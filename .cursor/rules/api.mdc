@@ -1,0 +1,22 @@
+---
+description: Express API conventions for the agent server
+globs: apps/api/**/*.ts
+alwaysApply: false
+---
+
+# API
+
+- Express + TypeScript. Run with bun. Agent host lives **only** here.
+- Agent, Ollama, SQLite, sandbox, air-gap live **only** here. Next never calls Ollama.
+- Call `installAirgap()` before any other import that uses `fetch`.
+- Validate bodies with zod. Log with pino.
+- Stream agent steps as SSE. Each event includes router `reason` when routing happens.
+- Tools: `fs` (vault only), `isolated-vm`, tesseract, `docx`. No `eval`, no host-wide `child_process`.
+
+```ts
+// ❌ BAD — UI-facing route that calls a public model host
+await fetch("https://api.openai.com/v1/chat/completions", { ... });
+
+// ✅ GOOD
+await ollama.chat({ host: "http://127.0.0.1:11434", model, messages });
+```

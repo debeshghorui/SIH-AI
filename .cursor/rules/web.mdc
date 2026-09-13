@@ -1,0 +1,23 @@
+---
+description: Next.js workbench — shadcn/ui, TanStack Query, API is Express
+globs: apps/web/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# Web
+
+- Next.js App Router. Components: shadcn/ui. Server state: TanStack Query.
+- No Next Route Handlers or Server Actions that touch Ollama, SQLite, or tools.
+- Browser calls **only** same-origin `/api/*` (Next rewrite → Express `:8787`).
+- `NEXT_TELEMETRY_DISABLED=1`. No `next/font` Google. Local fonts only.
+- Show: chat, agent trace (store / model / tools / reason), network meter, artifact download.
+- Do not import `ollama`, `better-sqlite3`, `isolated-vm`, or `tesseract.js` in this app.
+
+```ts
+// ❌ BAD
+import ollama from "ollama";
+await fetch("http://127.0.0.1:11434/api/chat", { ... });
+
+// ✅ GOOD
+const { data } = useQuery({ queryKey: ["airgap"], queryFn: () => api.airgap.events() });
+```

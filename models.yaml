@@ -1,0 +1,24 @@
+# Model registry. Add a row to add a model. Do not hard-code names in app code.
+# Tags must already exist in local Ollama. No cloud endpoints.
+
+models:
+  - id: nano
+    ollama: qwen2.5:1.5b
+    skills: [route, rewrite, step-back, hyde]
+    resident: true
+  - id: chat
+    ollama: qwen2.5:7b-instruct
+    skills: [rag, note, summarize]
+    resident: true
+  - id: vision
+    ollama: qwen2-vl:2b
+    skills: [ocr, pid, scan]
+    resident: true
+  - id: coder
+    ollama: qwen2.5-coder:7b
+    skills: [code, test]
+    resident: false
+  - id: embed
+    ollama: nomic-embed-text
+    skills: [embed]
+    resident: true

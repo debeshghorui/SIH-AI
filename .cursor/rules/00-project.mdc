@@ -1,0 +1,26 @@
+---
+description: Locked SIH 26117 facts — stack, air-gap, no cloud, no Python
+alwaysApply: true
+---
+
+# Project lock
+
+Before writing code, read `wiki/memory.md`. If a fact is not there, read one page from `wiki/INDEX.md`. Do not scan the repo to learn the stack.
+
+- Problem **26117**. Sovereign on-prem workbench. MRPL.
+- **TypeScript only.** No Python. Package manager: **bun**.
+- **Express** in `apps/api` + **Next.js** in `apps/web` (shadcn/ui + TanStack Query). Next is UI only.
+- Inference: official `ollama` npm → `127.0.0.1:11434` only.
+- Ban: `openai`, groq, anthropic, Pinecone, S3, LangChain.js, cloud OCR, any non-loopback HTTP.
+- New models go in `models.yaml`. Do not hard-code model names.
+- Packages not listed in `wiki/stack.md` require an update to that page first.
+
+```ts
+// ❌ BAD
+import OpenAI from "openai";
+const client = new OpenAI({ baseURL: "http://localhost:11434/v1" });
+
+// ✅ GOOD
+import ollama from "ollama";
+await ollama.chat({ model: "qwen2.5:7b-instruct", messages });
+```

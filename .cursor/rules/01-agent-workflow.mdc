@@ -1,0 +1,19 @@
+---
+description: Read wiki first, update memory, do not hallucinate missing modules
+alwaysApply: true
+---
+
+# Agent workflow
+
+1. Read `AGENTS.md` then `wiki/memory.md`.
+2. Open **one** wiki page (`architecture`, `stack`, `demo`, `map`, `decisions`).
+3. Open code only under the path in `wiki/map.md` for the task.
+4. If `memory.md` says a module does not exist, **do not invent it** in explanations or imports.
+
+After a material change (new package, new folder, new decision):
+
+- Append a dated line to `wiki/memory.md` Changelog.
+- Add the path to `wiki/map.md` Created.
+- If you added a dependency, add it to `wiki/stack.md` allow-list.
+
+Never claim Express, Next, SQLite, or Ollama wrappers exist until `memory.md` says they do.

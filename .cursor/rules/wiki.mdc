@@ -1,0 +1,12 @@
+---
+description: How to edit wiki and memory without drifting
+globs: wiki/**/*.md
+alwaysApply: false
+---
+
+# Wiki edits
+
+- Keep pages short. One concern per file.
+- `memory.md` is current truth. Do not duplicate long architecture here.
+- Locked facts: strike-through the old line, write the new one, changelog the date.
+- Do not move scoring rules out of `problem.md` or the allow-list out of `stack.md`.

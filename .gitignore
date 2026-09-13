@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.next/
+.turbo/
+.cache/
+*.log
+.env
+.env.*
+!.env.example
+data/plant.sqlite
+data/vault/**
+!data/vault/.gitkeep
+vendor/**
+!vendor/.gitkeep
+.DS_Store
