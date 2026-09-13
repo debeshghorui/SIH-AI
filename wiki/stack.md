@@ -7,8 +7,8 @@ If a package is not here, **do not add it** without updating this page and `memo
 | Package manager | bun | npm, pnpm, yarn |
 | Language | TypeScript, Node 22 | Python, FastAPI, Gradio |
 | API | Express in `apps/api` | Fastify, Next.js Route Handlers as the agent host |
-| UI | Next.js App Router in `apps/web` | Vite SPA, Gradio, client-side Ollama |
-| Components | shadcn/ui | random extra component kits |
+| UI | Next.js App Router in `apps/web` (`next`, `react`, `react-dom`) | Vite SPA, Gradio, client-side Ollama |
+| Components | shadcn/ui (`shadcn`, `@base-ui/react`, `class-variance-authority`, `cn`, `lucide-react`, `tw-animate-css`, Tailwind 4) | random extra component kits |
 | Server state | TanStack Query (`@tanstack/react-query`) | SWR, raw `useEffect` + `fetch` for API data |
 | LLM | `ollama` npm → `127.0.0.1:11434` | `openai`, groq-sdk, @anthropic-ai/sdk |
 | SQL | drizzle-orm + better-sqlite3 | Supabase, Prisma Cloud |

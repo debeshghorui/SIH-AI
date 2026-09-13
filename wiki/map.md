@@ -22,10 +22,11 @@ models.yaml                registry (repo root)
 wiki/                      this wiki
 ```
 
-Status: directories are placeholders. No implementation files yet.
+Status: `apps/web` is a workbench shell. `apps/api` is still a placeholder.
 
 When you add a real module, append one line under **Created** and date it.
 
 ## Created
 
+- 2026-09-14 — `apps/web` Next.js App Router, shadcn/ui, TanStack Query (`lib/query`), workbench (chat, trace, meter, artifacts)
 - 2026-09-14 — `models.yaml` (registry only, no loader)

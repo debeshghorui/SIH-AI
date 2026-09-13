@@ -6,7 +6,7 @@ Agents: **read this first**. After a material change, add a line under Changelog
 
 ## Phase
 
-`wiki-bootstrap` — agent docs and rules exist. **App is not scaffolded yet.** No `package.json`, no Express server, no Next app.
+`web-scaffold` — Next.js UI exists in `apps/web`. **Express agent host is not scaffolded yet.**
 
 ## Exists
 
@@ -15,12 +15,13 @@ Agents: **read this first**. After a material change, add a line under Changelog
 - `.cursor/rules/*` — always-on + api/web globs
 - `.cursor/skills/sovereign-workbench/` — read-wiki-first skill
 - `models.yaml` — registry (not loaded by code yet)
-- Empty placeholders: `apps/api/`, `apps/web/`, `data/`, `vendor/`
+- Empty placeholders: `apps/api/`, `data/`, `vendor/`
+- `apps/web` — Next.js App Router (UI only), shadcn/ui, TanStack Query workbench shell
+- Root `package.json` workspaces (`apps/web`); start UI with `bun run web`
 
 ## Does not exist (do not pretend it does)
 
-- Express server, Next.js app, shadcn components, TanStack Query setup
-- Ollama client wrapper, SQLite DB, sqlite-vec index, air-gap interceptor
+- Express server, Ollama client wrapper, SQLite DB, sqlite-vec index, air-gap interceptor
 - Agent loop, tools, sandbox, OCR, `docx` writer
 - Sample PDFs / SOPs (listed in `demo.md`, not created)
 - Cloud or Python anything
@@ -46,5 +47,6 @@ Agents: **read this first**. After a material change, add a line under Changelog
 
 ## Changelog
 
+- 2026-09-14 — Scaffolded `apps/web`: Next.js App Router, shadcn/ui, TanStack Query. Rewrites `/api/*` → Express `:8787`. No Google fonts. Express still missing.
 - 2026-09-14 — Stack change: bun; Express API; Next.js UI with shadcn/ui + TanStack Query. Fastify + Vite dropped. Still no application code.
 - 2026-09-14 — Created wiki, memory, Cursor rules, project skill, and `models.yaml`.
