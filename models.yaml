@@ -11,7 +11,7 @@ models:
     skills: [rag, note, summarize]
     resident: true
   - id: vision
-    ollama: qwen2-vl:2b
+    ollama: qwen2.5vl:3b
     skills: [ocr, pid, scan]
     resident: true
   - id: coder

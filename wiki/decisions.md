@@ -31,6 +31,9 @@ A local base URL still makes it easy to leak a cloud key. Use `ollama` only.
 
 Sandbox is `isolated-vm` (Docker Node image as fallback). Tests use `node:test`.
 
+~~Sandbox is `isolated-vm` (Docker Node image as fallback). Tests use `node:test`.~~
+**Updated 2026-09-14:** `isolated-vm` is a V8 native addon and cannot `dlopen` under Bun (Bun uses JavaScriptCore, not V8 — `HasCustomHostObject` symbol is missing). Docker is now the **primary and only** sandbox: `dockerode` runs `node:22-alpine --network=none` per execution. Requires Docker installed and running at the venue. Tests use `node:test` inside the container.
+
 ## D7 — Hard Word template
 
 7B models ramble. Agent fills slots in a `docx` template. Artifact name is always `approval_note.docx`.

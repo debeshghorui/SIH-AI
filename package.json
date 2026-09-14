@@ -2,10 +2,13 @@
   "name": "sovereign-workbench",
   "private": true,
   "packageManager": "bun@1.3.14",
-  "workspaces": ["apps/web"],
+  "workspaces": ["apps/web", "apps/api"],
   "scripts": {
     "web": "bun run --filter web dev",
     "web:build": "bun run --filter web build",
-    "web:start": "bun run --filter web start"
+    "web:start": "bun run --filter web start",
+    "api": "bun run --filter api dev",
+    "api:start": "bun run --filter api start",
+    "demo": "bun run --filter web build && bun run --filter api demo"
   }
 }

@@ -7,7 +7,7 @@ apps/api/src/query/        rewrite, step-back, decompose, HyDE
 apps/api/src/router/       store + model + tools + reason
 apps/api/src/retrieve/     SQL, sqlite-vec, FTS5, files
 apps/api/src/agent/        ReAct loop, SSE events
-apps/api/src/tools/        fs, isolated-vm, tesseract, docx
+apps/api/src/tools/        fs, sandbox (dockerode), tesseract, docx
 apps/api/src/airgap/       fetch patch, event log
 apps/api/src/models/       models.yaml loader + zod
 apps/web/app/              Next.js App Router pages
@@ -22,11 +22,15 @@ models.yaml                registry (repo root)
 wiki/                      this wiki
 ```
 
-Status: `apps/web` is a workbench shell. `apps/api` is still a placeholder.
+Status: `apps/web` is a workbench shell. `apps/api` boots Express + air-gap. Query/router/retrieve/agent/tools/models are not implemented.
 
 When you add a real module, append one line under **Created** and date it.
 
 ## Created
 
+- 2026-09-14 — `apps/api/src/retrieve/` (`db.ts`, `schema.ts`, `embed.ts`, `retrieve.ts`, `seed.ts`); `apps/api/src/query/translate.ts`; `apps/api/src/router/router.ts`; `apps/api/src/tools/` (`fs.ts`, `registry.ts`, `ocr/index.ts`, `docx/writer.ts`, `sandbox/index.ts`); `apps/api/src/agent/inspect.ts`; routes `POST /inspect`, `POST /upload`, `POST /sandbox`, `GET /artifacts`, `GET /artifacts/:name`; web `lib/query/inspect.ts`, `lib/query/trace-bus.ts`, `trace.tsx` live, `artifacts.tsx` list+download, `chat.tsx` attachment+inspect; `data/kb/*.md`, `data/samples/*`, `vendor/eng.traineddata.gz`; `data/plant.sqlite` seeded
+- 2026-09-14 — `apps/api/src/agent/` (`events.ts`, `loop.ts`, `sse.ts`); `POST /chat` SSE in `server.ts`; `apps/web/lib/query/chat.ts` (`streamChat`); `apps/web/components/chat.tsx` streaming UI
+- 2026-09-14 — `apps/api/src/models/` (`schema.ts`, `registry.ts`, `client.ts`, `health.ts`); `GET /models`, `GET /ollama/health` in `server.ts`; air-gap log split rings in `src/airgap/log.ts`
+- 2026-09-14 — `apps/api` Express boot (`src/index.ts`, `src/server.ts`, `src/demo.ts`), `src/airgap/` fetch wrap + event log, `GET /airgap/events`
 - 2026-09-14 — `apps/web` Next.js App Router, shadcn/ui, TanStack Query (`lib/query`), workbench (chat, trace, meter, artifacts)
 - 2026-09-14 — `models.yaml` (registry only, no loader)
