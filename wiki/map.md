@@ -28,6 +28,10 @@ When you add a real module, append one line under **Created** and date it.
 
 ## Created
 
+- 2026-09-19 — `apps/web/lib/model-labels.ts` (friendly answer-model names in model picker).
+
+- 2026-09-19 — Agent SSE `step` in `apps/api/src/agent/events.ts`; live timeline in `apps/web/components/trace.tsx`; hideable right pane in `workbench.tsx`.
+
 - 2026-09-18 — `apps/api/src/chat/sessions.ts`, `apps/api/src/chat/persist.ts`; `apps/web/lib/query/conversations.ts`; `apps/web/components/workbench-sidebar.tsx`. Conversation tables in `schema.ts` / `migrate()`.
 
 - 2026-09-18 — `apps/web/components/chat-markdown.tsx` (GFM prose for chat text segments)

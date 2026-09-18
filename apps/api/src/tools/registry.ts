@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { retrieve, type Citation } from "../retrieve/retrieve";
+import { retrieve } from "../retrieve/retrieve";
 import { vaultList } from "./fs";
 import { extractFindings } from "./ocr";
 import { writeApprovalNote, type ApprovalNote } from "./docx/writer";
@@ -40,7 +40,7 @@ export const tools: Record<string, Tool> = {
     input: toolInputSchema,
     async run(raw) {
       const parsed = toolInputSchema.parse(raw);
-      const citations: Citation[] = await retrieve(parsed.query, parsed.store);
+      const { citations } = await retrieve(parsed.query, parsed.store);
       if (citations.length === 0) return "no results";
       return citations
         .map((c, i) => `(${i + 1}) [${c.kind}] ${c.source} — ${c.snippet.slice(0, 200)}`)

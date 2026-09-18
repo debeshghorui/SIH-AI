@@ -9,18 +9,16 @@ import type { AgentEvent } from "../agent/events";
 /**
  * Agentic inspection beat (demo beats 2 + 3). Given a scanned inspection
  * already in the vault, this runs:
- *   1. OCR + vision over the scan          -> emit `observe` (raw findings)
- *   2. Ask the chat model to structure the findings into a table  -> emit `plan`
- *   3. Pull the tag's last inspection from SQL  -> emit `observe`
- *   4. Write approval_note.docx into the vault  -> emit `observe`
- *   5. Stream a short summary as tokens        -> emit `token` / `done`
- *
- * Every Ollama call goes through the air-gap-wrapped fetch.
+ *   1. OCR + vision over the scan
+ *   2. Ask the chat model to structure the findings into a table
+ *   3. Pull the tag's last inspection from SQL
+ *   4. Write approval_note.docx into the vault
+ *   5. Stream a short summary as tokens
  */
 
 export const inspectInputSchema = z.object({
-  name: z.string().min(1), // vault file name of the scan
-  tag: z.string().min(1), // plant tag, e.g. 12-P-104
+  name: z.string().min(1),
+  tag: z.string().min(1),
 });
 
 export type InspectInput = z.infer<typeof inspectInputSchema>;
@@ -29,8 +27,28 @@ export async function* runInspect(
   input: InspectInput,
   signal?: AbortSignal,
 ): AsyncGenerator<AgentEvent, void, unknown> {
-  // 1. OCR + vision
-  yield { type: "plan", thought: `OCR + vision over ${input.name}` };
+  const chat = getModel("chat");
+  const vision = getModel("vision");
+
+  yield {
+    type: "route",
+    store: "sql",
+    model: "chat",
+    tools: ["ocr", "docx", "search"],
+    reason:
+      "inspection beat: OCR/vision → structure findings → SQL history → approval_note.docx",
+  };
+  yield {
+    type: "step",
+    stage: "route",
+    title: "Inspection beat",
+    detail:
+      "Fixed pipeline for a scan: store=sql, model=chat, tools=[ocr, docx, search]. Router is skipped.",
+    model: "chat",
+    ollama: chat.ollama,
+    data: { store: "sql", nanoStore: "sql" },
+  };
+
   let ocrText = "";
   let visionFindings = "";
   try {
@@ -38,9 +56,13 @@ export async function* runInspect(
     ocrText = out.text;
     visionFindings = out.vision;
     yield {
-      type: "observe",
-      tool: "ocr",
-      result: `OCR: ${ocrText.slice(0, 300)}\nVision: ${visionFindings.slice(0, 300)}`,
+      type: "step",
+      stage: "tool",
+      title: `OCR + vision over ${input.name}`,
+      detail: `OCR: ${ocrText.slice(0, 400)}\nVision: ${visionFindings.slice(0, 400)}`,
+      model: "vision",
+      ollama: vision.ollama,
+      data: { tool: "ocr" },
     };
   } catch (err) {
     yield {
@@ -49,11 +71,11 @@ export async function* runInspect(
     };
   }
 
-  // 2. Structure findings with the chat model.
-  yield { type: "plan", thought: "structuring findings into a table" };
-  let structured: { findings: string[]; summary: string } = { findings: [], summary: "" };
+  let structured: { findings: string[]; summary: string } = {
+    findings: [],
+    summary: "",
+  };
   try {
-    const chat = getModel("chat");
     const res = await ollama().chat({
       model: chat.ollama,
       format: "json",
@@ -79,9 +101,13 @@ export async function* runInspect(
       .object({ summary: z.string(), findings: z.array(z.string()) })
       .parse(JSON.parse(res.message.content));
     yield {
-      type: "observe",
-      tool: "chat:structure",
-      result: `summary: ${structured.summary}\n${structured.findings.length} findings`,
+      type: "step",
+      stage: "tool",
+      title: "Structure findings",
+      detail: `summary: ${structured.summary}\n${structured.findings.length} findings`,
+      model: "chat",
+      ollama: chat.ollama,
+      data: { tool: "chat:structure" },
     };
   } catch (err) {
     yield {
@@ -90,17 +116,23 @@ export async function* runInspect(
     };
   }
 
-  // 3. Pull the tag's last inspection from SQL.
   const sqlRows = retrieveSql(input.tag);
-  if (sqlRows.length > 0) {
-    yield {
-      type: "observe",
-      tool: "retrieve:sql",
-      result: sqlRows.map((c) => `${c.heading}: ${c.snippet}`).join("\n"),
-    };
-  }
+  yield {
+    type: "step",
+    stage: "retrieve",
+    title: sqlRows.length
+      ? `Retrieve sql (${sqlRows.length})`
+      : "Retrieve sql (empty)",
+    detail: sqlRows.length
+      ? "Tag history from plant.sqlite."
+      : `No SQL rows for tag ${input.tag}.`,
+    data: {
+      store: "sql",
+      usedFts: false,
+      citations: sqlRows,
+    },
+  };
 
-  // 4. Write the docx.
   const note: ApprovalNote = {
     title: "Equipment Inspection Approval Note",
     prepared_by: "Sovereign Workbench",
@@ -119,7 +151,13 @@ export async function* runInspect(
   };
   try {
     const name = await writeApprovalNote(note);
-    yield { type: "observe", tool: "docx", result: `wrote ${name}` };
+    yield {
+      type: "step",
+      stage: "tool",
+      title: "Write approval note",
+      detail: `wrote ${name}`,
+      data: { tool: "docx" },
+    };
   } catch (err) {
     yield {
       type: "error",
@@ -127,7 +165,15 @@ export async function* runInspect(
     };
   }
 
-  // 5. Stream a short summary.
+  yield {
+    type: "step",
+    stage: "generate",
+    title: "Generate summary",
+    detail: `Streaming inspection summary from chat (${chat.ollama}).`,
+    model: "chat",
+    ollama: chat.ollama,
+  };
+
   const summaryText = `${note.tag}: ${note.summary} (${note.findings.length} findings). approval_note.docx written.`;
   for (const chunk of summaryText.split(/(\s+)/)) {
     if (signal?.aborted) return;

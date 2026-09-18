@@ -60,7 +60,13 @@ function RailButton({
       type="button"
       variant={active ? "secondary" : "ghost"}
       size={collapsed ? "icon-sm" : "sm"}
-      className={cn("w-full", !collapsed && "justify-start gap-2")}
+      className={cn(
+        "w-full",
+        !collapsed && "justify-start gap-2.5 px-2.5",
+        active &&
+          !collapsed &&
+          "bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-border/50",
+      )}
       aria-label={label}
       aria-current={active ? "page" : undefined}
       onClick={onClick}
@@ -186,7 +192,9 @@ function ConversationRow({
     <div
       className={cn(
         "group flex items-center gap-0.5 rounded-lg pr-0.5",
-        active ? "bg-muted" : "hover:bg-muted/60",
+        active
+          ? "bg-muted ring-1 ring-border/40"
+          : "hover:bg-muted/50",
       )}
     >
       <button
@@ -263,7 +271,7 @@ function ConversationSection({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <p className="px-2 pt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+      <p className="px-2.5 pt-3 pb-0.5 text-[0.65rem] font-semibold tracking-wider text-muted-foreground uppercase">
         {label}
       </p>
       {items.length === 0 ? (
@@ -310,17 +318,17 @@ export function WorkbenchSidebar({
   return (
     <aside
       className={cn(
-        "flex h-full shrink-0 flex-col border-r bg-background transition-[width] duration-200",
-        collapsed ? "w-12" : "w-60",
+        "flex h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 ease-out",
+        collapsed ? "w-[3.25rem]" : "w-[15.5rem] sm:w-64",
       )}
     >
-      <nav className="flex flex-col gap-1 p-2">
+      <nav className="flex flex-col gap-1 p-2.5 pt-3">
         <RailButton
           collapsed={collapsed}
           label="New chat"
           onClick={onNewChat}
         >
-          <SquarePen className="size-4" />
+          <SquarePen className="size-4 shrink-0" />
         </RailButton>
         <RailButton
           collapsed={collapsed}

@@ -5,9 +5,7 @@
  * with a ReadableStream body, decode chunk-by-chunk, split on the SSE frame
  * boundary (\n\n), and parse `event:` / `data:` lines into typed events.
  *
- * The event union mirrors apps/api/src/agent/events.ts. Only token/done/error
- * are emitted today; plan/observe/route are accepted so the UI keeps working
- * when the router and ReAct steps land.
+ * The event union mirrors apps/api/src/agent/events.ts.
  */
 
 export type ChatRole = "system" | "user" | "assistant";
@@ -16,6 +14,37 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
 }
+
+export type StepStage =
+  | "translate"
+  | "route"
+  | "retrieve"
+  | "tool"
+  | "generate"
+  | "error";
+
+export type StepCitation = {
+  kind: string;
+  source: string;
+  heading?: string;
+  score: number;
+  snippet: string;
+};
+
+export type StepData = {
+  rewritten?: string;
+  stepBack?: string;
+  subQueries?: string[];
+  hyde?: string;
+  nanoStore?: "sql" | "vector" | "files" | "none";
+  store?: "sql" | "vector" | "files" | "none";
+  guarded?: boolean;
+  parseFallback?: boolean;
+  preferModel?: string;
+  citations?: StepCitation[];
+  usedFts?: boolean;
+  tool?: string;
+};
 
 export type AgentEvent =
   | { type: "token"; content: string }
@@ -29,6 +58,15 @@ export type AgentEvent =
       model: "nano" | "chat" | "coder" | "vision";
       tools: string[];
       reason: string;
+    }
+  | {
+      type: "step";
+      stage: StepStage;
+      title: string;
+      detail: string;
+      model?: string;
+      ollama?: string;
+      data?: StepData;
     };
 
 export type PreferModel = "nano" | "chat" | "coder";
@@ -83,20 +121,16 @@ export async function streamChat(input: StreamChatInput): Promise<void> {
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      // SSE frames are separated by a blank line. The server writes \r\n\r\n,
-      // but be lenient about \n\n too.
       let frameEnd: number;
-      while (
-        (frameEnd = findFrameBoundary(buffer)) !== -1
-      ) {
+      while ((frameEnd = findFrameBoundary(buffer)) !== -1) {
         const frame = buffer.slice(0, frameEnd);
         buffer = buffer.slice(frameEnd).replace(/^(\r?\n){2}/, "");
-        const event = parseFrame(frame);
+        const event = parseAgentSseFrame(frame);
         if (event) input.onEvent(event);
       }
     }
     if (buffer.trim()) {
-      const event = parseFrame(buffer);
+      const event = parseAgentSseFrame(buffer);
       if (event) input.onEvent(event);
     }
   } finally {
@@ -112,7 +146,74 @@ function findFrameBoundary(buf: string): number {
   return Math.min(crlf, lf);
 }
 
-function parseFrame(frame: string): AgentEvent | null {
+const STAGES = new Set<StepStage>([
+  "translate",
+  "route",
+  "retrieve",
+  "tool",
+  "generate",
+  "error",
+]);
+
+function asStepData(raw: unknown): StepData | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const d = raw as Record<string, unknown>;
+  const data: StepData = {};
+  if (typeof d.rewritten === "string") data.rewritten = d.rewritten;
+  if (typeof d.stepBack === "string") data.stepBack = d.stepBack;
+  if (Array.isArray(d.subQueries)) {
+    data.subQueries = d.subQueries.filter((s): s is string => typeof s === "string");
+  }
+  if (typeof d.hyde === "string") data.hyde = d.hyde;
+  if (
+    d.nanoStore === "sql" ||
+    d.nanoStore === "vector" ||
+    d.nanoStore === "files" ||
+    d.nanoStore === "none"
+  ) {
+    data.nanoStore = d.nanoStore;
+  }
+  if (
+    d.store === "sql" ||
+    d.store === "vector" ||
+    d.store === "files" ||
+    d.store === "none"
+  ) {
+    data.store = d.store;
+  }
+  if (typeof d.guarded === "boolean") data.guarded = d.guarded;
+  if (typeof d.parseFallback === "boolean") data.parseFallback = d.parseFallback;
+  if (typeof d.preferModel === "string") data.preferModel = d.preferModel;
+  if (typeof d.usedFts === "boolean") data.usedFts = d.usedFts;
+  if (typeof d.tool === "string") data.tool = d.tool;
+  if (Array.isArray(d.citations)) {
+    data.citations = d.citations.flatMap((c) => {
+      if (!c || typeof c !== "object") return [];
+      const row = c as Record<string, unknown>;
+      if (
+        typeof row.kind !== "string" ||
+        typeof row.source !== "string" ||
+        typeof row.score !== "number" ||
+        typeof row.snippet !== "string"
+      ) {
+        return [];
+      }
+      return [
+        {
+          kind: row.kind,
+          source: row.source,
+          score: row.score,
+          snippet: row.snippet,
+          ...(typeof row.heading === "string" ? { heading: row.heading } : {}),
+        },
+      ];
+    });
+  }
+  return data;
+}
+
+/** Parse one SSE frame. Shared with the inspect stream consumer. */
+export function parseAgentSseFrame(frame: string): AgentEvent | null {
   let type = "message";
   let dataLine = "";
   for (const line of frame.split(/\r?\n/)) {
@@ -124,49 +225,60 @@ function parseFrame(frame: string): AgentEvent | null {
   }
   if (!dataLine) return null;
   try {
-    const data = JSON.parse(dataLine) as { type?: string };
-    // Trust the `event:` header; the data also carries `type` for round-trip.
-    if (type === "token" && typeof (data as { content?: unknown }).content === "string") {
-      return { type: "token", content: (data as { content: string }).content };
+    const data = JSON.parse(dataLine) as Record<string, unknown>;
+    if (type === "token" && typeof data.content === "string") {
+      return { type: "token", content: data.content };
     }
     if (type === "done") {
-      const id = (data as { conversationId?: unknown }).conversationId;
+      const id = data.conversationId;
       return {
         type: "done",
         ...(typeof id === "string" ? { conversationId: id } : {}),
       };
     }
-    if (type === "error" && typeof (data as { message?: unknown }).message === "string") {
-      return { type: "error", message: (data as { message: string }).message };
+    if (type === "error" && typeof data.message === "string") {
+      return { type: "error", message: data.message };
     }
-    if (type === "plan" && typeof (data as { thought?: unknown }).thought === "string") {
-      return { type: "plan", thought: (data as { thought: string }).thought };
+    if (type === "plan" && typeof data.thought === "string") {
+      return { type: "plan", thought: data.thought };
     }
     if (type === "observe") {
-      const d = data as { tool?: string; result?: string };
-      if (typeof d.tool === "string" && typeof d.result === "string") {
-        return { type: "observe", tool: d.tool, result: d.result };
+      if (typeof data.tool === "string" && typeof data.result === "string") {
+        return { type: "observe", tool: data.tool, result: data.result };
       }
     }
     if (type === "route") {
-      const d = data as {
-        store?: string;
-        model?: string;
-        tools?: string[];
-        reason?: string;
-      };
       if (
-        d.store &&
-        d.model &&
-        Array.isArray(d.tools) &&
-        typeof d.reason === "string"
+        typeof data.store === "string" &&
+        typeof data.model === "string" &&
+        Array.isArray(data.tools) &&
+        typeof data.reason === "string"
       ) {
         return {
           type: "route",
-          store: d.store as "sql" | "vector" | "files" | "none",
-          model: d.model as "nano" | "chat" | "coder" | "vision",
-          tools: d.tools,
-          reason: d.reason,
+          store: data.store as "sql" | "vector" | "files" | "none",
+          model: data.model as "nano" | "chat" | "coder" | "vision",
+          tools: data.tools.filter((t): t is string => typeof t === "string"),
+          reason: data.reason,
+        };
+      }
+    }
+    if (type === "step") {
+      if (
+        typeof data.stage === "string" &&
+        STAGES.has(data.stage as StepStage) &&
+        typeof data.title === "string" &&
+        typeof data.detail === "string"
+      ) {
+        const extras = asStepData(data.data);
+        return {
+          type: "step",
+          stage: data.stage as StepStage,
+          title: data.title,
+          detail: data.detail,
+          ...(typeof data.model === "string" ? { model: data.model } : {}),
+          ...(typeof data.ollama === "string" ? { ollama: data.ollama } : {}),
+          ...(extras ? { data: extras } : {}),
         };
       }
     }

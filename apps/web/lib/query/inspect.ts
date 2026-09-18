@@ -1,6 +1,10 @@
 "use client";
 
-import { streamChat, type AgentEvent } from "@/lib/query/chat";
+import {
+  parseAgentSseFrame,
+  streamChat,
+  type AgentEvent,
+} from "@/lib/query/chat";
 
 /**
  * Upload a file to the Express vault, then run the agentic inspection beat
@@ -53,12 +57,12 @@ export async function streamInspect(input: {
       while ((frameEnd = findFrame(buffer)) !== -1) {
         const frame = buffer.slice(0, frameEnd);
         buffer = buffer.slice(frameEnd).replace(/^(\r?\n){2}/, "");
-        const event = parseFrame(frame);
+        const event = parseAgentSseFrame(frame);
         if (event) input.onEvent(event);
       }
     }
     if (buffer.trim()) {
-      const event = parseFrame(buffer);
+      const event = parseAgentSseFrame(buffer);
       if (event) input.onEvent(event);
     }
   } finally {
@@ -66,48 +70,12 @@ export async function streamInspect(input: {
   }
 }
 
-// Same SSE frame helpers as chat.ts. Duplicated to keep this module
-// standalone (no cross-imports into the chat hook).
 function findFrame(buf: string): number {
   const crlf = buf.indexOf("\r\n\r\n");
   const lf = buf.indexOf("\n\n");
   if (crlf === -1) return lf;
   if (lf === -1) return crlf;
   return Math.min(crlf, lf);
-}
-
-function parseFrame(frame: string): AgentEvent | null {
-  let type = "message";
-  let dataLine = "";
-  for (const line of frame.split(/\r?\n/)) {
-    if (line.startsWith("event:")) type = line.slice(6).trim();
-    else if (line.startsWith("data:")) dataLine = line.slice(5).trim();
-  }
-  if (!dataLine) return null;
-  try {
-    const d = JSON.parse(dataLine) as Record<string, unknown>;
-    if (type === "token" && typeof d.content === "string")
-      return { type: "token", content: d.content };
-    if (type === "done") return { type: "done" };
-    if (type === "error" && typeof d.message === "string")
-      return { type: "error", message: d.message };
-    if (type === "plan" && typeof d.thought === "string")
-      return { type: "plan", thought: d.thought };
-    if (type === "observe" && typeof d.tool === "string" && typeof d.result === "string")
-      return { type: "observe", tool: d.tool, result: d.result };
-    if (type === "route" && typeof d.store === "string" && typeof d.model === "string" &&
-        Array.isArray(d.tools) && typeof d.reason === "string")
-      return {
-        type: "route",
-        store: d.store as "sql" | "vector" | "files" | "none",
-        model: d.model as "nano" | "chat" | "coder" | "vision",
-        tools: d.tools as string[],
-        reason: d.reason,
-      };
-  } catch {
-    return null;
-  }
-  return null;
 }
 
 export { streamChat };

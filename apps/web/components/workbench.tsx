@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { PanelLeft, PanelLeftClose } from "lucide-react";
+import {
+  PanelLeft,
+  PanelLeftClose,
+  PanelRight,
+  PanelRightClose,
+} from "lucide-react";
 import { Chat } from "@/components/chat";
 import { Meter } from "@/components/meter";
 import { Trace } from "@/components/trace";
@@ -14,11 +19,13 @@ import { Button } from "@/components/ui/button";
 import { createConversation } from "@/lib/query/conversations";
 
 const COLLAPSED_KEY = "workbench.sidebar.collapsed";
+const TRACE_KEY = "workbench.trace.collapsed";
 const MD = "(min-width: 768px)";
 
 export function Workbench() {
   const queryClient = useQueryClient();
   const [collapsed, setCollapsed] = useState(false);
+  const [traceCollapsed, setTraceCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [view, setView] = useState<SidebarView>("chat");
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -27,6 +34,9 @@ export function Workbench() {
   useEffect(() => {
     if (window.localStorage.getItem(COLLAPSED_KEY) === "1") {
       setCollapsed(true);
+    }
+    if (window.localStorage.getItem(TRACE_KEY) === "1") {
+      setTraceCollapsed(true);
     }
     const mq = window.matchMedia(MD);
     const onMq = () => {
@@ -51,6 +61,14 @@ export function Workbench() {
       return;
     }
     setMobileOpen((open) => !open);
+  }
+
+  function toggleTrace() {
+    setTraceCollapsed((current) => {
+      const next = !current;
+      window.localStorage.setItem(TRACE_KEY, next ? "1" : "0");
+      return next;
+    });
   }
 
   const newChat = useMutation({
@@ -89,35 +107,63 @@ export function Workbench() {
   const railCollapsed = collapsed && !mobileOpen;
 
   return (
-    <div className="flex h-svh flex-col overflow-hidden bg-background">
-      <header className="flex items-center justify-between gap-4 border-b px-3 py-3 md:px-6">
-        <div className="flex min-w-0 items-center gap-2">
+    <div className="workbench-surface flex h-svh flex-col overflow-hidden bg-background">
+      <header
+        className="flex shrink-0 items-center justify-between gap-3 border-b border-border/60 bg-background/90 px-3 py-2.5 backdrop-blur-md supports-[padding:max(0px)]:pt-[max(0.625rem,env(safe-area-inset-top))] sm:px-4 md:px-5"
+      >
+        <div className="flex min-w-0 items-center gap-2 sm:gap-3">
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
+            className="text-muted-foreground"
             aria-label={railCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-expanded={!railCollapsed}
             onClick={toggleRail}
           >
             {railCollapsed ? <PanelLeft /> : <PanelLeftClose />}
           </Button>
-          <div className="flex min-w-0 items-baseline gap-3">
-            <h1 className="font-heading text-lg font-medium">
-              Sovereign workbench
-            </h1>
-            <p className="hidden text-xs tracking-wide text-muted-foreground uppercase sm:block">
-              SIH 26117 · MRPL
-            </p>
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div
+              className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/80 bg-muted/50 text-foreground"
+              aria-hidden
+            >
+              <span className="font-mono text-[0.6rem] font-semibold tracking-widest">
+                MR
+              </span>
+            </div>
+            <div className="min-w-0 leading-tight">
+              <h1 className="truncate text-base font-semibold tracking-tight sm:text-[1.0625rem]">
+                MRPL Workbench
+              </h1>
+              <p className="truncate text-[0.6875rem] text-muted-foreground sm:text-xs">
+                On-prem agent · SIH 26117
+              </p>
+            </div>
           </div>
         </div>
-        <Meter />
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground"
+            aria-label={
+              traceCollapsed ? "Show agent trace" : "Hide agent trace"
+            }
+            aria-expanded={!traceCollapsed}
+            onClick={toggleTrace}
+          >
+            {traceCollapsed ? <PanelRight /> : <PanelRightClose />}
+          </Button>
+          <Meter />
+        </div>
       </header>
       <div className="relative flex min-h-0 flex-1">
         {mobileOpen ? (
           <button
             type="button"
-            className="absolute inset-0 z-30 bg-background/70 md:hidden"
+            className="absolute inset-0 z-30 bg-background/75 backdrop-blur-[2px] md:hidden"
             aria-label="Close sidebar"
             onClick={() => setMobileOpen(false)}
           />
@@ -125,7 +171,7 @@ export function Workbench() {
         <div
           className={
             mobileOpen
-              ? "absolute inset-y-0 left-0 z-40 h-full md:static md:z-0"
+              ? "absolute inset-y-0 left-0 z-40 h-full shadow-xl md:static md:z-0 md:shadow-none"
               : "hidden h-full md:block"
           }
         >
@@ -145,7 +191,13 @@ export function Workbench() {
             newChatPending={newChat.isPending}
           />
         </div>
-        <main className="grid min-h-0 min-w-0 flex-1 gap-4 overflow-hidden p-4 md:grid-cols-[minmax(0,1.4fr)_minmax(20rem,0.9fr)]">
+        <main
+          className={
+            traceCollapsed
+              ? "grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-2 sm:gap-4 sm:p-4"
+              : "grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-2 sm:gap-4 sm:p-4 md:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.9fr)] lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.95fr)] xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,1fr)]"
+          }
+        >
           <Chat
             conversationId={conversationId}
             onConversationBound={(id) => {
@@ -153,8 +205,14 @@ export function Workbench() {
               setVirgin(false);
             }}
           />
-          <aside className="flex min-h-0 flex-col overflow-y-auto">
-            <Trace />
+          <aside
+            className={
+              traceCollapsed
+                ? "hidden"
+                : "flex min-h-0 flex-col overflow-hidden max-md:min-h-[14rem]"
+            }
+          >
+            <Trace onCollapse={toggleTrace} />
           </aside>
         </main>
       </div>

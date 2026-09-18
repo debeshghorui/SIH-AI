@@ -24,8 +24,14 @@ export const citationSchema = z.object({
 
 export type Citation = z.infer<typeof citationSchema>;
 
+export type RetrieveResult = {
+  citations: Citation[];
+  usedFts: boolean;
+  bestVectorScore: number | null;
+};
+
 const TOP_K = 5;
-const VECTOR_SCORE_FLOOR = 6; // below this, fall back to FTS5
+export const VECTOR_SCORE_FLOOR = 6; // below this, fall back to FTS5
 
 /** SQL store: tag + last inspection. Returns 0..N citations. */
 export function retrieveSql(query: string): Citation[] {
@@ -169,14 +175,22 @@ export function retrieveFiles(query: string): Citation[] {
 export async function retrieve(
   query: string,
   store: "sql" | "vector" | "files" | "none",
-): Promise<Citation[]> {
+): Promise<RetrieveResult> {
   const all: Citation[] = [];
+  let usedFts = false;
+  let bestVectorScore: number | null = null;
   if (store === "sql" || store === "none") all.push(...retrieveSql(query));
   if (store === "vector" || store === "files" || store === "none") {
     const vec = await retrieveVector(query);
     all.push(...vec);
-    if (vec.length === 0 || Math.max(...vec.map((v) => v.score)) < VECTOR_SCORE_FLOOR) {
+    if (vec.length > 0) {
+      bestVectorScore = Math.max(...vec.map((v) => v.score));
+    } else {
+      bestVectorScore = 0;
+    }
+    if (vec.length === 0 || bestVectorScore < VECTOR_SCORE_FLOOR) {
       all.push(...retrieveFts(query));
+      usedFts = true;
     }
   }
   if (store === "files") all.push(...retrieveFiles(query));
@@ -192,5 +206,5 @@ export async function retrieve(
     })
     .sort((a, b) => b.score - a.score)
     .slice(0, TOP_K);
-  return merged;
+  return { citations: merged, usedFts, bestVectorScore };
 }

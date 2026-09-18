@@ -11,8 +11,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUp,
   ChevronDown,
-  CornerDownLeft,
+  MessageSquareText,
   Paperclip,
+  Sparkles,
   Square,
   X,
 } from "lucide-react";
@@ -30,7 +31,7 @@ import {
 } from "@/lib/query/chat";
 import { wantsInspectionBeat } from "@/lib/attachment-intent";
 import { uploadToVault, streamInspect } from "@/lib/query/inspect";
-import { publishTrace } from "@/lib/query/trace-bus";
+import { publishTrace, resetTrace } from "@/lib/query/trace-bus";
 import { getConversation } from "@/lib/query/conversations";
 
 type DisplayMessage = {
@@ -153,9 +154,16 @@ export function Chat({
 
     const controller = new AbortController();
     abortRef.current = controller;
+    resetTrace();
 
     const onEvent = (event: AgentEvent) => {
-      if (event.type === "route" || event.type === "plan" || event.type === "observe") {
+      if (
+        event.type === "route" ||
+        event.type === "plan" ||
+        event.type === "observe" ||
+        event.type === "step" ||
+        event.type === "error"
+      ) {
         publishTrace(event);
       }
       if (event.type === "token") {
@@ -285,7 +293,7 @@ export function Chat({
 
   return (
     <section
-      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-xl bg-background ring-1 ring-foreground/10"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-card/40 shadow-sm"
       aria-label="Chat"
     >
       <div
@@ -293,34 +301,45 @@ export function Chat({
         onScroll={onThreadScroll}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
-        <div className="mx-auto w-full max-w-3xl px-4 pb-6 pt-6 md:px-6">
+        <div className="mx-auto w-full max-w-3xl px-4 pb-6 pt-5 sm:pt-6 md:px-6">
           {messages.length === 0 ? (
-            <div className="flex min-h-[min(50vh,24rem)] flex-col items-center justify-center gap-6 text-center">
-              <div className="max-w-md space-y-2">
-                <p className="text-xl font-medium tracking-tight">
-                  What can I help with?
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Ask about a tag, a procedure, or a document. Attach a scan to
-                  summarise it, or inspect it for an approval note.
-                </p>
+            <div className="flex min-h-[min(52vh,26rem)] flex-col items-center justify-center gap-7 px-2 text-center sm:gap-8">
+              <div className="flex max-w-md flex-col items-center gap-3.5">
+                <div
+                  className="flex size-11 items-center justify-center rounded-xl border border-border/60 bg-muted/40 text-foreground"
+                  aria-hidden
+                >
+                  <Sparkles className="size-5 text-muted-foreground" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-lg font-semibold tracking-tight sm:text-xl">
+                    How can I help?
+                  </p>
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    Equipment tags, isolation SOPs, and inspections — all on
+                    prem. Attach a scan to summarise or draft an approval note.
+                  </p>
+                </div>
               </div>
-              <div className="flex w-full max-w-md flex-col gap-1">
+              <div className="grid w-full max-w-md gap-2">
                 {SUGGESTIONS.map((suggestion) => (
                   <button
                     key={suggestion}
                     type="button"
                     onClick={() => setDraft(suggestion)}
-                    className="flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                    className="flex items-center gap-3 rounded-lg border border-border/60 bg-muted/25 px-3.5 py-2.5 text-left text-sm text-foreground/90 transition-colors hover:border-foreground/20 hover:bg-muted/50"
                   >
-                    <CornerDownLeft className="size-3.5 shrink-0 opacity-50" />
-                    <span className="truncate">{suggestion}</span>
+                    <MessageSquareText
+                      className="size-4 shrink-0 text-muted-foreground"
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1 truncate">{suggestion}</span>
                   </button>
                 ))}
               </div>
             </div>
           ) : (
-            <ul className="flex flex-col gap-8">
+            <ul className="flex flex-col gap-6 sm:gap-8">
               {messages.map((message) => {
                 if (
                   message.role === "assistant" &&
@@ -334,7 +353,7 @@ export function Chat({
                   return (
                     <li key={message.id} className="flex justify-end">
                       <div
-                        className="max-w-[min(100%,34rem)] rounded-[1.25rem] bg-chat-user px-4 py-2.5 text-[0.9375rem] leading-7 text-chat-user-foreground"
+                        className="max-w-[min(100%,34rem)] rounded-2xl border border-border/40 bg-chat-user px-4 py-2.5 text-[0.9375rem] leading-7 text-chat-user-foreground"
                       >
                         <p className="whitespace-pre-wrap break-words">
                           {message.content}
@@ -378,9 +397,9 @@ export function Chat({
         </div>
       ) : null}
 
-      <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 pb-4 pt-3 backdrop-blur-sm md:px-6">
+      <div className="shrink-0 border-t border-border/50 bg-card/60 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2.5 backdrop-blur-md sm:px-4 sm:pb-4 sm:pt-3 md:px-6">
         <form
-          className="mx-auto flex w-full max-w-3xl flex-col gap-2 rounded-[1.75rem] border border-border/80 bg-muted/30 p-2 shadow-sm ring-1 ring-foreground/5 transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-ring/30"
+          className="mx-auto flex w-full max-w-3xl flex-col gap-2 rounded-xl border border-border/60 bg-background/95 p-2 shadow-sm transition-[border-color,box-shadow] focus-within:border-foreground/25 focus-within:ring-2 focus-within:ring-ring/40"
           onSubmit={onSubmit}
         >
           <input
@@ -392,7 +411,7 @@ export function Chat({
           />
 
           {attachment && (
-            <div className="flex items-center gap-2 self-start rounded-lg bg-muted px-2 py-1">
+            <div className="flex items-center gap-2 self-start rounded-md border border-border/50 bg-muted/50 px-2 py-1">
               <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
               <span className="max-w-56 truncate font-mono text-xs">
                 {attachment.name}
@@ -460,6 +479,7 @@ export function Chat({
               <Button
                 type="submit"
                 size="icon-sm"
+                className="rounded-full shadow-sm"
                 disabled={!draft.trim()}
                 aria-label="Send message"
               >
@@ -468,8 +488,8 @@ export function Chat({
             )}
           </div>
         </form>
-        <p className="mx-auto mt-2 max-w-3xl px-2 text-center text-[0.7rem] text-muted-foreground/80">
-          Local agent · 127.0.0.1 only · Enter to send
+        <p className="mx-auto mt-2 max-w-3xl px-2 text-center text-[0.68rem] text-muted-foreground/90">
+          On-prem only · Enter to send · Shift+Enter for a new line
         </p>
       </div>
     </section>

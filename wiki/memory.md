@@ -1,12 +1,12 @@
 # Memory (living)
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 
 Agents: **read this first**. After a material change, add a line under Changelog. Do not delete locked facts. Strike them and write the replacement.
 
 ## Phase
 
-`full-roadmap` — Sovereign workbench end-to-end. Express on `127.0.0.1:8787` with air-gap, full ReAct agent (`route → retrieve → generate` with citations, streaming `plan`/`route`/`observe`/`token`/`done` SSE), query translation + router on the nano model, sqlite-vec + FTS5 retrieval, vault-scoped fs tool, OCR/vision (qwen2.5vl:3b), `approval_note.docx` writer, agentic inspection beat (`POST /inspect`), Docker sandbox (`POST /sandbox`, `--network=none`). **All beats run; air-gap `outbound: 0`.** Docker daemon must be running at the venue for the coding beat to execute (degrades gracefully if down).
+`full-roadmap` — Sovereign workbench end-to-end. Express on `127.0.0.1:8787` with air-gap, full ReAct agent (`route → retrieve → generate` with citations, streaming `step`/`route`/`token`/`done` SSE), query translation + router on the nano model, sqlite-vec + FTS5 retrieval, vault-scoped fs tool, OCR/vision (qwen2.5vl:3b), `approval_note.docx` writer, agentic inspection beat (`POST /inspect`), Docker sandbox (`POST /sandbox`, `--network=none`). **All beats run; air-gap `outbound: 0`.** Docker daemon must be running at the venue for the coding beat to execute (degrades gracefully if down).
 
 ## Exists
 
@@ -24,16 +24,16 @@ Agents: **read this first**. After a material change, add a line under Changelog
 - `apps/api/src/router/` — `router.ts` (store+model+tools+reason decision on nano model)
 - `apps/api/src/retrieve/` — `db.ts` (bun:sqlite + drizzle + sqlite-vec + FTS5), `schema.ts` (tags, inspections, kb_chunks, conversations, messages), `embed.ts`, `retrieve.ts` (SQL + vector + FTS5 + rank top-5), `seed.ts`
 - `apps/api/src/chat/` — `sessions.ts` (thread CRUD + pin), `persist.ts` (append last turn on chat `done`)
-- `apps/api/src/agent/` — `events.ts`, `loop.ts` (`runAgent` full ReAct), `inspect.ts` (OCR/vision → findings → docx), `sse.ts`
+- `apps/api/src/agent/` — `events.ts` (`step` + `route` SSE), `loop.ts` (`runAgent` full ReAct), `inspect.ts` (OCR/vision → findings → docx), `sse.ts`
 - `apps/api/src/tools/` — `fs.ts` (vault-scoped, path-traversal guard), `registry.ts` (search/fs/ocr/sandbox/docx), `ocr/index.ts`, `docx/writer.ts`, `sandbox/index.ts` (dockerode, per-language ephemeral containers)
-- `apps/web` — chat (streams + attachment upload + inspect trigger + Run on Sandbox + preferred-model picker + persisted threads), collapsible sidebar (Chat / Files, pinned then recents), trace, meter, artifacts (vault list in Files)
+- `apps/web` — chat (streams + attachment upload + inspect trigger + Run on Sandbox + preferred-model picker + persisted threads), collapsible sidebar (Chat / Files, pinned then recents), append-only agent trace (hideable right pane), meter, artifacts (vault list in Files)
 - Root `package.json` workspaces (`apps/web`, `apps/api`); `bun run web`, `bun run api`, `bun run demo`, `bun run sandbox:prepull`
 
 ## Does not exist (do not pretend it does)
 
 - ~~Express server, air-gap interceptor~~
 - ~~Ollama client wrapper~~ — `apps/api/src/models/client.ts` (official `ollama` npm, host `127.0.0.1:11434`), `models.yaml` loader, `GET /models`, `GET /ollama/health`. SQLite DB, sqlite-vec index
-- ~~Agent loop~~ — full ReAct in `apps/api/src/agent/loop.ts` (`runAgent`: translate → route → retrieve → generate with citations, emits plan/route/observe/token/done)
+- ~~Agent loop~~ — full ReAct in `apps/api/src/agent/loop.ts` (`runAgent`: translate → route → retrieve → generate with citations, emits `step`/`route`/`token`/`done`)
 - ~~SQLite DB, sqlite-vec index, router, tools, sandbox, OCR, docx writer~~ — all built
 - Sample PDFs / SOPs — **now created** under `data/kb/` and `data/samples/`
 - Cloud or Python anything
@@ -59,6 +59,10 @@ Agents: **read this first**. After a material change, add a line under Changelog
 - Whether Docker is available at the venue (sandbox degrades gracefully if down; start Docker Desktop for the coding beat).
 
 ## Changelog
+
+- 2026-09-19 — Web UI polish: monochrome dark palette (black/gray/white), MRPL header, responsive trace grid from `md`, safe-area padding, neutral air-gap meter, vault file icons, gray user bubbles, trace/sidebar spacing, model picker labels (`apps/web/lib/model-labels.ts`: Router/Chat/Coder).
+
+- 2026-09-19 — Agent trace is append-only `step` SSE (translate, route+guard, retrieve scores/FTS5, tools, generate). Inspect emits a synthetic `route`. Right pane hideable (`workbench.trace.collapsed`). Traces are not stored in SQLite.
 
 - 2026-09-18 — Sidebar chat delete: trash on hover, confirm, `DELETE /conversations/:id` (messages cascade). Active thread clears to an empty composer.
 

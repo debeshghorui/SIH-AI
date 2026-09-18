@@ -24,6 +24,14 @@ export const routeDecisionSchema = z.object({
 
 export type RouteDecision = z.infer<typeof routeDecisionSchema>;
 
+/** Final decision plus what nano said before the keyword guard / parse fallback. */
+export type RouteResult = {
+  decision: RouteDecision;
+  nano: RouteDecision;
+  guarded: boolean;
+  parseFallback: boolean;
+};
+
 const SYSTEM = `You route industrial plant questions for a sovereign workbench. Reply ONLY with JSON matching the schema. Choose:
 - store: "sql" for tag/inspection/numeric lookups, "vector" for SOP/procedure/how-to questions, "files" for uploaded scans/PDFs, "none" ONLY for small talk that needs no plant data.
 - model: "chat" for SOP/answer, "vision" if the user attached an image/scan, "coder" for JS code, "nano" only for trivial rewrites.
@@ -64,7 +72,7 @@ export async function route(
   query: string,
   translated: TranslatedQuery,
   opts: { hasAttachment?: boolean } = {},
-): Promise<RouteDecision> {
+): Promise<RouteResult> {
   // Only mention the attachment when there is one — a "no" line tempts the
   // nano model into reasoning about a file the user never sent.
   const userPrompt = [
@@ -87,14 +95,27 @@ export async function route(
       ],
     });
     const parsed = JSON.parse(res.message.content);
-    return guardStore(query, routeDecisionSchema.parse(parsed));
+    const nano = routeDecisionSchema.parse(parsed);
+    const decision = guardStore(query, nano);
+    return {
+      decision,
+      nano,
+      guarded: decision.store !== nano.store,
+      parseFallback: false,
+    };
   } catch {
     // Fallback: a defensible default so the agent loop never stalls.
-    return routeDecisionSchema.parse({
+    const decision = routeDecisionSchema.parse({
       store: opts.hasAttachment ? "files" : "vector",
       model: opts.hasAttachment ? "vision" : "chat",
       tools: opts.hasAttachment ? ["ocr"] : ["search"],
       reason: "router fallback (nano parse failed)",
     });
+    return {
+      decision,
+      nano: decision,
+      guarded: false,
+      parseFallback: true,
+    };
   }
 }
