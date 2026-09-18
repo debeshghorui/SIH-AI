@@ -29,8 +29,6 @@ A local base URL still makes it easy to leak a cloud key. Use `ollama` only.
 
 ## D6 — Coding beat is JavaScript
 
-Sandbox is `isolated-vm` (Docker Node image as fallback). Tests use `node:test`.
-
 ~~Sandbox is `isolated-vm` (Docker Node image as fallback). Tests use `node:test`.~~
 **Updated 2026-09-14:** `isolated-vm` is a V8 native addon and cannot `dlopen` under Bun (Bun uses JavaScriptCore, not V8 — `HasCustomHostObject` symbol is missing). Docker is now the **primary and only** sandbox: `dockerode` runs `node:22-alpine --network=none` per execution. Requires Docker installed and running at the venue. Tests use `node:test` inside the container.
 
@@ -41,3 +39,9 @@ Sandbox is `isolated-vm` (Docker Node image as fallback). Tests use `node:test`.
 ## D8 — bun
 
 All installs and scripts: `bun`. Not npm, pnpm, or yarn.
+
+## D9 — Workbench chrome is monochrome; code is not
+
+User lock (2026-09-19). Chat shell, sidebar, header, bubbles: **black / gray / white only**. No blue or purple product accents.
+
+Exempt: `ChatCodeBlock` syntax tokens (`--code-*` in `apps/web/app/globals.css`) stay chromatic. Air-gap meter uses success green when `outbound: 0`, destructive when leaked. Do not flatten those to gray.

@@ -9,4 +9,5 @@ alwaysApply: false
 - Keep pages short. One concern per file.
 - `memory.md` is current truth. Do not duplicate long architecture here.
 - Locked facts: strike-through the old line, write the new one, changelog the date.
+- Changelog: keep the last ~5 dated lines. Older history is git.
 - Do not move scoring rules out of `problem.md` or the allow-list out of `stack.md`.

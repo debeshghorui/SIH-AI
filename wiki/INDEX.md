@@ -4,13 +4,13 @@ Source of truth for agents and humans. Short pages on purpose.
 
 | Read | When |
 |---|---|
-| [memory.md](memory.md) | Every session. What is true **right now**. |
+| [memory.md](memory.md) | Every session. What is true **right now**, including user preferences. |
 | [problem.md](problem.md) | Scoring rules, four demo beats, what “done” means |
 | [architecture.md](architecture.md) | Pipeline, process split, data flow |
 | [stack.md](stack.md) | Allowed npm packages. If it is not listed, do not add it. |
-| [decisions.md](decisions.md) | Why Express + Next (UI only) + bun + Ollama |
+| [decisions.md](decisions.md) | Why Express + Next (UI only) + bun + Ollama. UI chrome lock (D9). |
 | [demo.md](demo.md) | 8-minute script and sample pack |
-| [map.md](map.md) | Where code will live. Create files only on this map. |
+| [map.md](map.md) | Where code lives. Create files only on this map. |
 
 ## How to navigate (agents)
 
