@@ -43,6 +43,8 @@ export type StepData = {
   preferModel?: string;
   citations?: StepCitation[];
   usedFts?: boolean;
+  usedHyde?: boolean;
+  queries?: string[];
   tool?: string;
 };
 

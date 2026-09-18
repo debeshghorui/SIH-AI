@@ -208,6 +208,9 @@ export function Trace({ onCollapse }: { onCollapse?: () => void }) {
                         {step.data?.usedFts ? (
                           <Badge variant="outline">FTS5</Badge>
                         ) : null}
+                        {step.data?.usedHyde ? (
+                          <Badge variant="outline">HyDE</Badge>
+                        ) : null}
                         {step.data?.parseFallback ? (
                           <Badge variant="outline">fallback</Badge>
                         ) : null}
@@ -241,6 +244,11 @@ export function Trace({ onCollapse }: { onCollapse?: () => void }) {
                       {step.data?.hyde ? (
                         <Field label="HyDE">
                           <Expandable text={step.data.hyde} />
+                        </Field>
+                      ) : null}
+                      {step.data?.queries?.length ? (
+                        <Field label="searched">
+                          {step.data.queries.join("\n")}
                         </Field>
                       ) : null}
                       {step.data?.citations?.length ? (

@@ -138,8 +138,8 @@ export function ChatCodeBlock({
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <div className="overflow-hidden rounded-xl border border-border bg-background">
-        <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5">
+      <div className="overflow-hidden rounded-xl border border-border bg-muted/25">
+        <div className="flex items-center justify-between gap-2 border-b border-border/80 bg-muted/40 px-3 py-1.5">
           <span className="font-mono text-[0.7rem] text-muted-foreground">
             {label}
           </span>
@@ -157,7 +157,7 @@ export function ChatCodeBlock({
             )}
           </Button>
         </div>
-        <pre className="max-h-96 overflow-auto p-3 font-mono text-xs leading-5">
+        <pre className="max-h-96 overflow-auto bg-background/60 p-3 font-mono text-[0.8125rem] leading-6">
           <code className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3">
             {lines.map((line, index) => (
               <span key={index} className="contents">

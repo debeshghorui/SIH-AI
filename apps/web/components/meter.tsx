@@ -28,10 +28,10 @@ export function Meter() {
           className={cn(
             "h-7 gap-1.5 border px-2.5 font-normal tabular-nums shadow-none",
             secure &&
-              "border-foreground/15 bg-muted/60 text-foreground [&_svg]:text-foreground/80",
+              "border-success/40 bg-success/12 text-success [&_svg]:text-success",
             !secure &&
               outbound > 0 &&
-              "border-foreground/30 bg-foreground/5 text-foreground",
+              "border-destructive/40 bg-destructive/10 text-destructive",
           )}
         >
           {secure ? (

@@ -69,6 +69,8 @@ export const stepDataSchema = z.object({
   preferModel: z.string().optional(),
   citations: z.array(stepCitationSchema).optional(),
   usedFts: z.boolean().optional(),
+  usedHyde: z.boolean().optional(),
+  queries: z.array(z.string()).optional(),
   tool: z.string().optional(),
 });
 

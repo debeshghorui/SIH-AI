@@ -1,7 +1,11 @@
 import type { Message } from "ollama";
 import { ollama } from "../models/client";
 import { getModel } from "../models/registry";
-import { translateQuery } from "../query/translate";
+import {
+  nearDuplicate,
+  retrievalPlan,
+  translateQuery,
+} from "../query/translate";
 import { route } from "../router/router";
 import {
   retrieve,
@@ -53,6 +57,9 @@ export async function* runAgent(
       hyde: query,
     };
   }
+  const extraSubs = translated.subQueries.filter(
+    (q) => !nearDuplicate(q, translated.rewritten),
+  );
   yield {
     type: "step",
     stage: "translate",
@@ -64,9 +71,13 @@ export async function* runAgent(
     ollama: nano.ollama,
     data: {
       rewritten: translated.rewritten,
-      stepBack: translated.stepBack,
-      subQueries: translated.subQueries,
-      hyde: translated.hyde,
+      ...(nearDuplicate(translated.stepBack, translated.rewritten)
+        ? {}
+        : { stepBack: translated.stepBack }),
+      ...(extraSubs.length ? { subQueries: extraSubs } : {}),
+      ...(nearDuplicate(translated.hyde, translated.rewritten)
+        ? {}
+        : { hyde: translated.hyde }),
     },
   };
 
@@ -146,8 +157,13 @@ export async function* runAgent(
   // 3. Retrieve
   let citations: Citation[] = [];
   try {
-    const result = await retrieve(translated.rewritten, decision.store);
+    const plan = retrievalPlan(translated, query);
+    const result = await retrieve(plan.queries, decision.store, {
+      hyde: plan.hyde,
+    });
     citations = result.citations;
+    const searched = result.queries.join(" | ");
+    const hydeLine = result.usedHyde ? " HyDE embedded on the vector path." : "";
     const ftsLine = result.usedFts
       ? `FTS5 keyword fallback because best vector score was ${result.bestVectorScore ?? 0} (floor ${VECTOR_SCORE_FLOOR}).`
       : "No FTS5 fallback.";
@@ -157,7 +173,13 @@ export async function* runAgent(
         stage: "retrieve",
         title: "Retrieve skipped",
         detail: "Router store is none — no plant documents were queried.",
-        data: { store: "none", citations: [], usedFts: false },
+        data: {
+          store: "none",
+          citations: [],
+          usedFts: false,
+          queries: result.queries,
+          usedHyde: result.usedHyde,
+        },
       };
     } else {
       yield {
@@ -167,12 +189,14 @@ export async function* runAgent(
           ? `Retrieve ${decision.store} (${citations.length})`
           : `Retrieve ${decision.store} (empty)`,
         detail: citations.length
-          ? ftsLine
-          : `No citations from store ${decision.store}. ${ftsLine}`,
+          ? `Searched: ${searched}.${hydeLine} ${ftsLine}`
+          : `No citations from store ${decision.store}. Searched: ${searched}.${hydeLine} ${ftsLine}`,
         data: {
           store: decision.store,
           citations,
           usedFts: result.usedFts,
+          queries: result.queries,
+          usedHyde: result.usedHyde,
         },
       };
     }

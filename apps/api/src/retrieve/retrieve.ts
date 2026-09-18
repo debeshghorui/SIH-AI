@@ -28,6 +28,8 @@ export type RetrieveResult = {
   citations: Citation[];
   usedFts: boolean;
   bestVectorScore: number | null;
+  queries: string[];
+  usedHyde: boolean;
 };
 
 const TOP_K = 5;
@@ -167,21 +169,68 @@ export function retrieveFiles(query: string): Citation[] {
   return [];
 }
 
+function mergeTop(all: Citation[]): Citation[] {
+  const best = new Map<string, Citation>();
+  for (const c of all) {
+    const key = `${c.source}|${c.heading ?? ""}`;
+    const prev = best.get(key);
+    if (!prev || c.score > prev.score) best.set(key, c);
+  }
+  return [...best.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, TOP_K);
+}
+
+function asQueryList(query: string | readonly string[]): string[] {
+  const raw = (Array.isArray(query) ? [...query] : [query]).map((q) =>
+    q.trim(),
+  );
+  const out: string[] = [];
+  for (const q of raw) {
+    if (!q) continue;
+    if (out.some((existing) => existing.toLowerCase() === q.toLowerCase())) {
+      continue;
+    }
+    out.push(q);
+    if (out.length >= 3) break;
+  }
+  return out;
+}
+
 /**
  * Merge + rank. Vector results above the floor win; if the best vector
  * score is below the floor, FTS5 fills in. SQL results always surface
- * (they are exact matches). Top-5 overall.
+ * (they are exact matches). Top-5 overall. Extra short queries run in
+ * parallel; `hyde` is embedded on the vector path only (never FTS).
  */
 export async function retrieve(
-  query: string,
+  query: string | readonly string[],
   store: "sql" | "vector" | "files" | "none",
+  opts: { hyde?: string } = {},
 ): Promise<RetrieveResult> {
+  const queries = asQueryList(query);
+  if (store === "none") {
+    return {
+      citations: [],
+      usedFts: false,
+      bestVectorScore: null,
+      queries,
+      usedHyde: false,
+    };
+  }
+  const hyde = opts.hyde?.trim() || "";
+  const usedHyde = hyde.length > 0;
   const all: Citation[] = [];
   let usedFts = false;
   let bestVectorScore: number | null = null;
-  if (store === "sql" || store === "none") all.push(...retrieveSql(query));
-  if (store === "vector" || store === "files" || store === "none") {
-    const vec = await retrieveVector(query);
+
+  if (store === "sql") {
+    for (const q of queries) all.push(...retrieveSql(q));
+  }
+  if (store === "vector" || store === "files") {
+    const vectorQueries = usedHyde ? [...queries, hyde] : queries;
+    const vecLists = await Promise.all(vectorQueries.map((q) => retrieveVector(q)));
+    const vec = vecLists.flat();
     all.push(...vec);
     if (vec.length > 0) {
       bestVectorScore = Math.max(...vec.map((v) => v.score));
@@ -189,22 +238,19 @@ export async function retrieve(
       bestVectorScore = 0;
     }
     if (vec.length === 0 || bestVectorScore < VECTOR_SCORE_FLOOR) {
-      all.push(...retrieveFts(query));
+      for (const q of queries) all.push(...retrieveFts(q));
       usedFts = true;
     }
   }
-  if (store === "files") all.push(...retrieveFiles(query));
+  if (store === "files") {
+    for (const q of queries) all.push(...retrieveFiles(q));
+  }
 
-  // Dedup by (source, heading), keep highest score, sort desc, top-5.
-  const seen = new Set<string>();
-  const merged = all
-    .filter((c) => {
-      const key = `${c.source}|${c.heading ?? ""}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .sort((a, b) => b.score - a.score)
-    .slice(0, TOP_K);
-  return { citations: merged, usedFts, bestVectorScore };
+  return {
+    citations: mergeTop(all),
+    usedFts,
+    bestVectorScore,
+    queries,
+    usedHyde,
+  };
 }

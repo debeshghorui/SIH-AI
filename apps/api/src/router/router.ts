@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { ollama } from "../models/client";
 import { getModel } from "../models/registry";
-import type { TranslatedQuery } from "../query/translate";
+import { nearDuplicate, type TranslatedQuery } from "../query/translate";
 
 /**
  * Router. Decides, for a translated query:
@@ -75,12 +75,19 @@ export async function route(
 ): Promise<RouteResult> {
   // Only mention the attachment when there is one — a "no" line tempts the
   // nano model into reasoning about a file the user never sent.
+  const extraSubs = translated.subQueries.filter(
+    (q) => !nearDuplicate(q, translated.rewritten),
+  );
   const userPrompt = [
     `Original: ${query}`,
     `Rewritten: ${translated.rewritten}`,
-    `Step-back: ${translated.stepBack}`,
-    `Sub-queries: ${translated.subQueries.join(" | ")}`,
-    `HyDE: ${translated.hyde}`,
+    ...(!nearDuplicate(translated.stepBack, translated.rewritten)
+      ? [`Step-back: ${translated.stepBack}`]
+      : []),
+    ...(extraSubs.length ? [`Sub-queries: ${extraSubs.join(" | ")}`] : []),
+    ...(!nearDuplicate(translated.hyde, translated.rewritten)
+      ? [`HyDE: ${translated.hyde}`]
+      : []),
     ...(opts.hasAttachment ? ["Attachment: yes (image/scan)"] : []),
   ].join("\n");
 
