@@ -7,19 +7,21 @@ import {
   type ChangeEvent,
   type FormEvent,
 } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, CornerDownLeft, Paperclip, Square, X } from "lucide-react";
-import { ChatMessageBody } from "@/components/chat-message-body";
-import { Button } from "@/components/ui/button";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
+  ArrowUp,
+  ChevronDown,
+  CornerDownLeft,
+  Paperclip,
+  Square,
+  X,
+} from "lucide-react";
+import { ChatMessageBody } from "@/components/chat-message-body";
+import {
+  ModelPicker,
+  usePreferModel,
+} from "@/components/model-picker";
+import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
   streamChat,
@@ -29,6 +31,7 @@ import {
 import { wantsInspectionBeat } from "@/lib/attachment-intent";
 import { uploadToVault, streamInspect } from "@/lib/query/inspect";
 import { publishTrace } from "@/lib/query/trace-bus";
+import { getConversation } from "@/lib/query/conversations";
 
 type DisplayMessage = {
   id: string;
@@ -47,20 +50,83 @@ const SUGGESTIONS = [
   "Summarise the attached document",
 ];
 
-export function Chat() {
+export function Chat({
+  conversationId = null,
+  onConversationBound,
+}: {
+  conversationId?: string | null;
+  onConversationBound?: (id: string) => void;
+} = {}) {
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [attachment, setAttachment] = useState<File | null>(null);
+  const [preferModel, setPreferModel] = usePreferModel();
   const abortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [pinnedToBottom, setPinnedToBottom] = useState(true);
+  const prevIdRef = useRef<string | null>(conversationId);
+  const hydratedIdRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
 
-  // Keep the newest message in view as tokens stream in.
+  const conversationQuery = useQuery({
+    queryKey: ["conversations", conversationId],
+    queryFn: () => getConversation(conversationId!),
+    enabled: Boolean(conversationId) && typeof window !== "undefined",
+    staleTime: 0,
+  });
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages]);
+    const prev = prevIdRef.current;
+    prevIdRef.current = conversationId;
+    if (prev && prev !== conversationId) {
+      abortRef.current?.abort();
+      setBusy(false);
+      setDraft("");
+      setMessages([]);
+      hydratedIdRef.current = null;
+      clearAttachment();
+    } else if (!prev && conversationId) {
+      if (hydratedIdRef.current === "pending") {
+        hydratedIdRef.current = conversationId;
+      }
+    }
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (busy) return;
+    const data = conversationQuery.data;
+    if (!conversationId || !data || data.id !== conversationId) return;
+    if (hydratedIdRef.current === conversationId) return;
+    hydratedIdRef.current = conversationId;
+    setMessages(
+      data.messages.map((m) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+      })),
+    );
+  }, [busy, conversationId, conversationQuery.data]);
+
+  function scrollToBottom(behavior: ScrollBehavior = "smooth") {
+    bottomRef.current?.scrollIntoView({ block: "end", behavior });
+  }
+
+  function onThreadScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setPinnedToBottom(distance < 48);
+  }
+
+  // Keep the newest message in view while streaming if the user is at the bottom.
+  useEffect(() => {
+    if (pinnedToBottom) {
+      scrollToBottom("auto");
+    }
+  }, [messages, pinnedToBottom]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -80,8 +146,10 @@ export function Chat() {
       streaming: true,
     };
     setMessages((current) => [...current, userMsg, assistantMsg]);
+    setPinnedToBottom(true);
     setDraft("");
     setBusy(true);
+    hydratedIdRef.current = conversationId ?? "pending";
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -117,6 +185,10 @@ export function Chat() {
             m.id === assistantId ? { ...m, streaming: false } : m,
           ),
         );
+        if (event.conversationId) {
+          onConversationBound?.(event.conversationId);
+        }
+        void queryClient.invalidateQueries({ queryKey: ["conversations"] });
       }
     };
 
@@ -163,6 +235,8 @@ export function Chat() {
           signal: controller.signal,
           hasAttachment: true,
           attachmentName: name,
+          preferModel: preferModel === "auto" ? undefined : preferModel,
+          conversationId: conversationId ?? undefined,
           onEvent,
         });
       } catch (err) {
@@ -177,6 +251,8 @@ export function Chat() {
       await streamChat({
         messages: history,
         signal: controller.signal,
+        preferModel: preferModel === "auto" ? undefined : preferModel,
+        conversationId: conversationId ?? undefined,
         onEvent,
       });
     }
@@ -208,79 +284,103 @@ export function Chat() {
   }
 
   return (
-    <Card className="flex h-full min-h-0 flex-col">
-      <CardHeader className="border-b">
-        <CardTitle>Chat</CardTitle>
-        <CardDescription>
-          Local agent on 127.0.0.1 · nothing leaves this machine.
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="min-h-0 flex-1 pt-(--card-spacing)">
-        <ScrollArea className="h-full pr-3">
+    <section
+      className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-xl bg-background ring-1 ring-foreground/10"
+      aria-label="Chat"
+    >
+      <div
+        ref={scrollRef}
+        onScroll={onThreadScroll}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+      >
+        <div className="mx-auto w-full max-w-3xl px-4 pb-6 pt-6 md:px-6">
           {messages.length === 0 ? (
-            <div className="flex flex-col gap-4 py-2">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">
-                  Ask about a tag, a procedure, or a document.
+            <div className="flex min-h-[min(50vh,24rem)] flex-col items-center justify-center gap-6 text-center">
+              <div className="max-w-md space-y-2">
+                <p className="text-xl font-medium tracking-tight">
+                  What can I help with?
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Attach a scan to summarise it, or ask to inspect it and get
-                  an approval note.
+                  Ask about a tag, a procedure, or a document. Attach a scan to
+                  summarise it, or inspect it for an approval note.
                 </p>
               </div>
-              <div className="flex flex-col gap-1">
+              <div className="flex w-full max-w-md flex-col gap-1">
                 {SUGGESTIONS.map((suggestion) => (
                   <button
                     key={suggestion}
                     type="button"
                     onClick={() => setDraft(suggestion)}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    className="flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
                   >
-                    <CornerDownLeft className="size-3.5 shrink-0 opacity-60" />
+                    <CornerDownLeft className="size-3.5 shrink-0 opacity-50" />
                     <span className="truncate">{suggestion}</span>
                   </button>
                 ))}
               </div>
             </div>
           ) : (
-            <ul className="flex flex-col gap-4 pb-1">
-              {messages.map((message) => (
-                <li
-                  key={message.id}
-                  className={
-                    message.role === "user"
-                      ? "flex flex-col items-end gap-1"
-                      : "flex flex-col items-start gap-1"
-                  }
-                >
-                  <span className="px-1 text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
-                    {message.role === "user" ? "You" : "Assistant"}
-                  </span>
-                  <div
-                    className={
-                      message.role === "user"
-                        ? "max-w-[85%] rounded-2xl rounded-tr-sm bg-secondary px-3.5 py-2.5"
-                        : "max-w-[92%] rounded-2xl rounded-tl-sm bg-muted px-3.5 py-2.5"
-                    }
-                  >
+            <ul className="flex flex-col gap-8">
+              {messages.map((message) => {
+                if (
+                  message.role === "assistant" &&
+                  !message.content &&
+                  !message.streaming
+                ) {
+                  return null;
+                }
+
+                if (message.role === "user") {
+                  return (
+                    <li key={message.id} className="flex justify-end">
+                      <div
+                        className="max-w-[min(100%,34rem)] rounded-[1.25rem] bg-chat-user px-4 py-2.5 text-[0.9375rem] leading-7 text-chat-user-foreground"
+                      >
+                        <p className="whitespace-pre-wrap break-words">
+                          {message.content}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                }
+
+                return (
+                  <li key={message.id} className="w-full min-w-0 py-0.5">
                     <ChatMessageBody
                       content={message.content}
                       error={message.error}
                       streaming={message.streaming}
                     />
-                  </div>
-                </li>
-              ))}
-              <div ref={bottomRef} />
+                  </li>
+                );
+              })}
+              <div ref={bottomRef} className="h-px shrink-0" aria-hidden />
             </ul>
           )}
-        </ScrollArea>
-      </CardContent>
+        </div>
+      </div>
 
-      <CardFooter className="flex-col items-stretch gap-0">
+      {!pinnedToBottom && messages.length > 0 ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-[calc(7.5rem+env(safe-area-inset-bottom,0px))] z-10 flex justify-center">
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="secondary"
+            className="pointer-events-auto size-8 rounded-full shadow-md"
+            aria-label="Scroll to latest message"
+            onClick={() => {
+              setPinnedToBottom(true);
+              scrollToBottom();
+            }}
+          >
+            <ChevronDown />
+          </Button>
+        </div>
+      ) : null}
+
+      <div className="shrink-0 border-t border-border/60 bg-background/95 px-4 pb-4 pt-3 backdrop-blur-sm md:px-6">
         <form
-          className="flex flex-col gap-2 rounded-xl border border-input bg-background p-2 transition-colors focus-within:border-ring dark:bg-input/30"
+          className="mx-auto flex w-full max-w-3xl flex-col gap-2 rounded-[1.75rem] border border-border/80 bg-muted/30 p-2 shadow-sm ring-1 ring-foreground/5 transition-[border-color,box-shadow] focus-within:border-ring/60 focus-within:ring-ring/30"
           onSubmit={onSubmit}
         >
           <input
@@ -329,15 +429,22 @@ export function Chat() {
           />
 
           <div className="flex items-center justify-between gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Attach a scan or PDF"
-            >
-              <Paperclip />
-            </Button>
+            <div className="flex min-w-0 items-center gap-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Attach a scan or PDF"
+              >
+                <Paperclip />
+              </Button>
+              <ModelPicker
+                value={preferModel}
+                onChange={setPreferModel}
+                disabled={busy}
+              />
+            </div>
 
             {busy ? (
               <Button
@@ -361,11 +468,10 @@ export function Chat() {
             )}
           </div>
         </form>
-
-        <p className="px-1 pt-2 pb-1 text-xs text-muted-foreground">
-          Enter to send · Shift + Enter for a new line
+        <p className="mx-auto mt-2 max-w-3xl px-2 text-center text-[0.7rem] text-muted-foreground/80">
+          Local agent · 127.0.0.1 only · Enter to send
         </p>
-      </CardFooter>
-    </Card>
+      </div>
+    </section>
   );
 }

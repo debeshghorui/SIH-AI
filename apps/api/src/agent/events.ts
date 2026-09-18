@@ -17,6 +17,7 @@ export const tokenEventSchema = z.object({
 
 export const doneEventSchema = z.object({
   type: z.literal("done"),
+  conversationId: z.string().optional(),
 });
 
 export const errorEventSchema = z.object({

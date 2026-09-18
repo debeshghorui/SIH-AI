@@ -1,6 +1,7 @@
 "use client";
 
 import { ChatCodeBlock } from "@/components/chat-code-block";
+import { ChatMarkdown } from "@/components/chat-markdown";
 import { splitMessageSegments } from "@/lib/message-segments";
 
 type ChatMessageBodyProps = {
@@ -35,20 +36,15 @@ export function ChatMessageBody({
         }
 
         return (
-          <p
+          <ChatMarkdown
             key={`text-${index}`}
-            className={
-              error
-                ? "whitespace-pre-wrap text-sm leading-6 text-destructive"
-                : "whitespace-pre-wrap text-sm leading-6"
-            }
-          >
-            {segment.text}
-          </p>
+            text={segment.text}
+            error={error}
+          />
         );
       })}
       {streaming ? (
-        <span className="inline-block h-3.5 w-1.5 animate-pulse rounded-xs bg-muted-foreground/60" />
+        <span className="inline-block h-4 w-1 animate-pulse rounded-full bg-foreground/50" />
       ) : null}
     </div>
   );

@@ -46,6 +46,8 @@
   --color-code-attr: var(--code-attr);
   --color-code-number: var(--code-number);
   --color-code-punct: var(--code-punct);
+  --color-chat-user: var(--chat-user);
+  --color-chat-user-foreground: var(--chat-user-foreground);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -99,6 +101,8 @@
   --code-attr: oklch(0.5 0.13 70);
   --code-number: oklch(0.48 0.11 40);
   --code-punct: oklch(0.5 0 0);
+  --chat-user: oklch(0.52 0.17 252);
+  --chat-user-foreground: oklch(0.99 0 0);
 }
 
 .dark {
@@ -140,6 +144,8 @@
   --code-attr: oklch(0.82 0.1 85);
   --code-number: oklch(0.82 0.08 55);
   --code-punct: oklch(0.72 0 0);
+  --chat-user: oklch(0.42 0.14 258);
+  --chat-user-foreground: oklch(0.99 0 0);
 }
 
 @layer base {

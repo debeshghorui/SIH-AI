@@ -5,8 +5,14 @@ export function makeQueryClient() {
     defaultOptions: {
       queries: {
         staleTime: 5_000,
-        retry: false,
+        retry: 1,
         refetchOnWindowFocus: false,
+        // Workbench is loopback-only. A browser "offline" flag must not
+        // pause GET /api/* (otherwise the sidebar and meter stay empty).
+        networkMode: "always",
+      },
+      mutations: {
+        networkMode: "always",
       },
     },
   });

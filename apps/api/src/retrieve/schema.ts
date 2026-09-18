@@ -43,6 +43,31 @@ export const kbChunks = sqliteTable("kb_chunks", {
   created_at: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+/**
+ * Chat threads. Pinned rows sort above recents in the workbench sidebar.
+ * `pinned` is 0/1 (SQLite has no bool).
+ */
+export const conversations = sqliteTable("conversations", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  pinned: integer("pinned").notNull().default(0),
+  created_at: text("created_at").notNull(),
+  updated_at: text("updated_at").notNull(),
+});
+
+/** User/assistant turns only. System prompts are not stored. */
+export const messages = sqliteTable("messages", {
+  id: text("id").primaryKey(),
+  conversation_id: text("conversation_id")
+    .notNull()
+    .references(() => conversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(), // user | assistant
+  content: text("content").notNull(),
+  created_at: text("created_at").notNull(),
+});
+
 export type Tag = typeof tags.$inferSelect;
 export type Inspection = typeof inspections.$inferSelect;
 export type KbChunk = typeof kbChunks.$inferSelect;
+export type ConversationRow = typeof conversations.$inferSelect;
+export type MessageRow = typeof messages.$inferSelect;

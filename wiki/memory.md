@@ -18,14 +18,15 @@ Agents: **read this first**. After a material change, add a line under Changelog
 - `data/` — `plant.sqlite` (seeded: 3 tags, 3 inspections, 16 KB chunks vectorized + FTS5), `kb/*.md` SOPs, `samples/` (tank_levels.csv, parseLevels.test.ts, inspection_scan.png, pid_c3.png), `vault/` (uploads + generated docx)
 - `vendor/eng.traineddata.gz` — vendored for offline tesseract (currently unused; vision model carries OCR)
 - `apps/web` — Next.js App Router (UI only), shadcn/ui, TanStack Query workbench shell
-- `apps/api` — Express on `127.0.0.1:8787`, `installAirgap()`, `GET /airgap/events`, `GET /models`, `GET /ollama/health`, `POST /chat` (SSE ReAct), `POST /inspect` (SSE inspection beat), `POST /upload`, `POST /sandbox`, `GET /sandbox/health`, `DELETE /sandbox/preview/:id`, `GET /artifacts`, `GET /artifacts/:name`
+- `apps/api` — Express on `127.0.0.1:8787`, `installAirgap()`, `GET /airgap/events`, `GET /models`, `GET /ollama/health`, `POST /chat` (SSE ReAct, optional `preferModel` + `conversationId`, persists turns on `done`), `GET/POST /conversations`, `GET/PATCH/DELETE /conversations/:id`, `POST /inspect` (SSE inspection beat), `POST /upload`, `POST /sandbox`, `GET /sandbox/health`, `DELETE /sandbox/preview/:id`, `GET /artifacts`, `GET /artifacts/:name`
 - `apps/api/src/models/` — `models.yaml` loader (zod) + `ollama` client pinned to `127.0.0.1:11434` + health probe
 - `apps/api/src/query/` — `translate.ts` (rewrite/step-back/decompose/HyDE on nano model)
 - `apps/api/src/router/` — `router.ts` (store+model+tools+reason decision on nano model)
-- `apps/api/src/retrieve/` — `db.ts` (bun:sqlite + drizzle + sqlite-vec + FTS5), `schema.ts`, `embed.ts`, `retrieve.ts` (SQL + vector + FTS5 + rank top-5), `seed.ts`
+- `apps/api/src/retrieve/` — `db.ts` (bun:sqlite + drizzle + sqlite-vec + FTS5), `schema.ts` (tags, inspections, kb_chunks, conversations, messages), `embed.ts`, `retrieve.ts` (SQL + vector + FTS5 + rank top-5), `seed.ts`
+- `apps/api/src/chat/` — `sessions.ts` (thread CRUD + pin), `persist.ts` (append last turn on chat `done`)
 - `apps/api/src/agent/` — `events.ts`, `loop.ts` (`runAgent` full ReAct), `inspect.ts` (OCR/vision → findings → docx), `sse.ts`
 - `apps/api/src/tools/` — `fs.ts` (vault-scoped, path-traversal guard), `registry.ts` (search/fs/ocr/sandbox/docx), `ocr/index.ts`, `docx/writer.ts`, `sandbox/index.ts` (dockerode, per-language ephemeral containers)
-- `apps/web` — chat (streams + attachment upload + inspect trigger + Run on Sandbox), trace (live route/plan/observe via bus), meter, artifacts (list + download)
+- `apps/web` — chat (streams + attachment upload + inspect trigger + Run on Sandbox + preferred-model picker + persisted threads), collapsible sidebar (Chat / Files, pinned then recents), trace, meter, artifacts (vault list in Files)
 - Root `package.json` workspaces (`apps/web`, `apps/api`); `bun run web`, `bun run api`, `bun run demo`, `bun run sandbox:prepull`
 
 ## Does not exist (do not pretend it does)
@@ -59,6 +60,13 @@ Agents: **read this first**. After a material change, add a line under Changelog
 
 ## Changelog
 
+- 2026-09-18 — Sidebar chat delete: trash on hover, confirm, `DELETE /conversations/:id` (messages cascade). Active thread clears to an empty composer.
+
+- 2026-09-18 — Chat sessions in SQLite (`conversations` + `messages`). Express `GET/POST /conversations`, `GET/PATCH/DELETE /conversations/:id`. `POST /chat` optional `conversationId`; `done` includes the id. Workbench collapsible sidebar: Chat vs Files (vault moved off the right column), pinned then recents. No Radix sidebar kit.
+
+- 2026-09-18 — Chat thread UI: ChatGPT-style layout (centered column, user blue pills right, assistant flat prose, pill composer, scroll-to-bottom).
+- 2026-09-18 — Chat assistant prose renders Markdown (`react-markdown` + `remark-gfm` in `apps/web/components/chat-markdown.tsx`); fenced blocks still split for streaming + `ChatCodeBlock` / Run on Sandbox.
+- 2026-09-18 — Chat composer preferred-model picker (Auto / chat / coder / nano). `POST /chat` accepts optional `preferModel`; generate honors it, router still chooses store + tools. Registry from `GET /models`. Inspect beat unchanged.
 - 2026-09-18 — Docker sandbox is multi-language and wired to **Run on Sandbox**. One ephemeral container per click (`node:22-alpine` / `python:3.12-alpine` / `nginx:alpine`). Graceful stop is SIGTERM then SIGKILL; `GET /sandbox/health` + `DELETE /sandbox/preview/:id`; venue pre-pull `bun run sandbox:prepull`. UI shows stdout/stderr, exit chip, HTML iframe preview, and the image/net/cpu/mem trace line.
 - 2026-09-18 — Chat code fences use a local tokenizer (`apps/web/lib/highlight.ts`) for HTML/CSS/JS/TS/Python/JSON token colors. No Shiki/streamdown (not on the stack).
 - 2026-09-18 — Chat renders fenced code (html/css/js/ts/python and others) as a code block with copy. Runnable languages get a **Run on Sandbox** button (disabled while the fence is still streaming or Docker is down). Parser: `apps/web/lib/message-segments.ts`.

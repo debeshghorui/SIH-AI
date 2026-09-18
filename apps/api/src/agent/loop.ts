@@ -7,6 +7,8 @@ import { retrieve, type Citation } from "../retrieve/retrieve";
 import { extractFindings } from "../tools/ocr";
 import type { AgentEvent } from "./events";
 
+export type PreferModel = "nano" | "chat" | "coder";
+
 export interface RunAgentInput {
   messages: Message[];
   signal?: AbortSignal;
@@ -14,6 +16,8 @@ export interface RunAgentInput {
   hasAttachment?: boolean;
   /** Vault filename when the UI uploaded a document for this turn. */
   attachmentName?: string;
+  /** User preference for the generate step. Router still chooses store + tools. */
+  preferModel?: PreferModel;
 }
 
 /**
@@ -57,12 +61,16 @@ export async function* runAgent(
   const decision = await route(query, translated, {
     hasAttachment: input.hasAttachment,
   });
+  const routedAnswer = decision.model === "vision" ? "chat" : decision.model;
+  const answerId = input.preferModel ?? routedAnswer;
   yield {
     type: "route",
     store: decision.store,
-    model: decision.model,
+    model: input.preferModel ?? decision.model,
     tools: decision.tools,
-    reason: decision.reason,
+    reason: input.preferModel
+      ? `${decision.reason} (user preferred ${input.preferModel})`
+      : decision.reason,
   };
 
   // 2b. Read an uploaded vault document into context (PDF text layer or vision).
@@ -115,7 +123,7 @@ export async function* runAgent(
     .map((c, i) => `(${i + 1}) ${c.source} — ${c.heading ?? ""}: ${c.snippet}`)
     .join("\n");
 
-  const answerModel = getModel(decision.model === "vision" ? "chat" : decision.model);
+  const answerModel = getModel(answerId);
   const systemContent =
     "You are the MRPL sovereign workbench assistant. Answer concisely about plant SOPs, isolation, and approval notes. " +
     "Cite sources only as (1), (2), ... matching the numbered context below. Never invent a source, filename, or citation number that is not in the context. " +

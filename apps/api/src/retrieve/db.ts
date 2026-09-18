@@ -141,6 +141,36 @@ export function migrate(): void {
       tokenize = 'porter unicode61'
     );
   `);
+
+  raw.exec(`
+    CREATE TABLE IF NOT EXISTS conversations (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      pinned INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  raw.exec(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+  `);
+
+  raw.exec(`
+    CREATE INDEX IF NOT EXISTS messages_conversation_created
+      ON messages(conversation_id, created_at);
+  `);
+
+  raw.exec(`
+    CREATE INDEX IF NOT EXISTS conversations_pinned_updated
+      ON conversations(pinned, updated_at);
+  `);
 }
 
 export { schema };

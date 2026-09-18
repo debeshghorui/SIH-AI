@@ -19,7 +19,7 @@ export interface ChatMessage {
 
 export type AgentEvent =
   | { type: "token"; content: string }
-  | { type: "done" }
+  | { type: "done"; conversationId?: string }
   | { type: "error"; message: string }
   | { type: "plan"; thought: string }
   | { type: "observe"; tool: string; result: string }
@@ -31,6 +31,8 @@ export type AgentEvent =
       reason: string;
     };
 
+export type PreferModel = "nano" | "chat" | "coder";
+
 export interface StreamChatInput {
   messages: ChatMessage[];
   signal?: AbortSignal;
@@ -39,6 +41,10 @@ export interface StreamChatInput {
   hasAttachment?: boolean;
   /** Vault filename after POST /upload — document text is read server-side. */
   attachmentName?: string;
+  /** Generate-step preference. Omit for Auto (router chooses). */
+  preferModel?: PreferModel;
+  /** Existing thread. Omit to let Express create one on `done`. */
+  conversationId?: string;
 }
 
 export async function streamChat(input: StreamChatInput): Promise<void> {
@@ -49,6 +55,8 @@ export async function streamChat(input: StreamChatInput): Promise<void> {
       messages: input.messages,
       hasAttachment: input.hasAttachment ?? false,
       attachmentName: input.attachmentName,
+      ...(input.preferModel ? { preferModel: input.preferModel } : {}),
+      ...(input.conversationId ? { conversationId: input.conversationId } : {}),
     }),
     signal: input.signal,
   });
@@ -121,7 +129,13 @@ function parseFrame(frame: string): AgentEvent | null {
     if (type === "token" && typeof (data as { content?: unknown }).content === "string") {
       return { type: "token", content: (data as { content: string }).content };
     }
-    if (type === "done") return { type: "done" };
+    if (type === "done") {
+      const id = (data as { conversationId?: unknown }).conversationId;
+      return {
+        type: "done",
+        ...(typeof id === "string" ? { conversationId: id } : {}),
+      };
+    }
     if (type === "error" && typeof (data as { message?: unknown }).message === "string") {
       return { type: "error", message: (data as { message: string }).message };
     }

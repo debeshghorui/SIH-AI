@@ -28,6 +28,10 @@ When you add a real module, append one line under **Created** and date it.
 
 ## Created
 
+- 2026-09-18 — `apps/api/src/chat/sessions.ts`, `apps/api/src/chat/persist.ts`; `apps/web/lib/query/conversations.ts`; `apps/web/components/workbench-sidebar.tsx`. Conversation tables in `schema.ts` / `migrate()`.
+
+- 2026-09-18 — `apps/web/components/chat-markdown.tsx` (GFM prose for chat text segments)
+- 2026-09-18 — `apps/web/lib/query/models.ts`; `apps/web/components/model-picker.tsx`; `apps/web/components/ui/select.tsx`. Chat `preferModel` on `POST /chat`.
 - 2026-09-18 — `apps/api/scripts/prepull-sandbox.ts`; `apps/web/lib/query/sandbox.ts`; `apps/web/components/sandbox-output.tsx`. Sandbox routes: `GET /sandbox/health`, `DELETE /sandbox/preview/:id`.
 - 2026-09-18 — `apps/web/lib/highlight.ts` (offline token colors for chat code fences)
 - 2026-09-14 — `apps/web/lib/attachment-intent.ts` (chat vs inspection-beat routing for an attached file)

@@ -4,14 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileDown, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { apiDelete, apiGet } from "@/lib/query/api";
 
 type Artifact = { name: string; size: number; mtime: string };
@@ -40,21 +32,18 @@ export function Artifacts() {
   const items = data ?? [];
 
   return (
-    <Card>
-      <CardHeader className="border-b">
-        <CardTitle>Artifacts</CardTitle>
-        <CardDescription>
-          Uploads and generated files in the Express vault.
-        </CardDescription>
-        {items.length > 0 && (
-          <CardAction>
-            <Badge variant="outline">{items.length}</Badge>
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent className="max-h-64 overflow-y-auto pt-(--card-spacing)">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+          Uploads
+        </p>
+        {items.length > 0 ? (
+          <Badge variant="outline">{items.length}</Badge>
+        ) : null}
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-1">
         {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="px-2 py-2 text-sm text-muted-foreground">
             Attach a PDF or scan in chat — it lands here. Inspect a scan to
             also generate approval_note.docx.
           </p>
@@ -106,11 +95,11 @@ export function Artifacts() {
           </ul>
         )}
         {deleteMutation.isError ? (
-          <p className="pt-2 text-xs text-destructive">
+          <p className="px-2 pt-2 text-xs text-destructive">
             Delete failed: {deleteMutation.error.message}
           </p>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

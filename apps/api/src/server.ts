@@ -7,6 +7,18 @@ import { ollamaHealth } from "./models/health";
 import { runAgent } from "./agent/loop";
 import { runInspect } from "./agent/inspect";
 import { pipeEvents } from "./agent/sse";
+import { migrate } from "./retrieve/db";
+import { withPersistedDone } from "./chat/persist";
+import {
+  ConversationNotFoundError,
+  createConversation,
+  deleteConversation,
+  getConversation,
+  listConversations,
+  setPinned,
+  setTitle,
+  TITLE_MAX,
+} from "./chat/sessions";
 import { vaultList, resolveVaultPath, vaultWrite, vaultDelete } from "./tools/fs";
 import {
   isPreviewLanguage,
@@ -35,7 +47,18 @@ const chatRequestSchema = z.object({
   messages: z.array(chatMessageSchema).min(1),
   hasAttachment: z.boolean().default(false),
   attachmentName: z.string().min(1).optional(),
+  preferModel: z.enum(["nano", "chat", "coder"]).optional(),
+  conversationId: z.string().uuid().optional(),
 });
+
+const patchConversationSchema = z
+  .object({
+    pinned: z.boolean().optional(),
+    title: z.string().min(1).max(TITLE_MAX).optional(),
+  })
+  .refine((d) => d.pinned !== undefined || d.title !== undefined, {
+    message: "empty patch",
+  });
 
 export function createApp() {
   const app = express();
@@ -79,6 +102,70 @@ export function createApp() {
 
   app.get("/ollama/health", async (_req, res) => {
     res.json(await ollamaHealth());
+  });
+
+  app.get("/conversations", (_req, res) => {
+    res.json({ items: listConversations() });
+  });
+
+  app.post("/conversations", (_req, res) => {
+    res.status(201).json(createConversation());
+  });
+
+  app.get("/conversations/:id", (req, res) => {
+    const detail = getConversation(req.params.id);
+    if (!detail) {
+      res.status(404).json({ error: "not-found" });
+      return;
+    }
+    res.json(detail);
+  });
+
+  app.patch("/conversations/:id", (req, res) => {
+    const parsed = patchConversationSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "bad-request", issues: parsed.error.issues });
+      return;
+    }
+    try {
+      let current = parsed.data.title
+        ? setTitle(req.params.id, parsed.data.title)
+        : undefined;
+      if (parsed.data.pinned !== undefined) {
+        current = setPinned(req.params.id, parsed.data.pinned);
+      }
+      if (!current) {
+        const detail = getConversation(req.params.id);
+        if (!detail) throw new ConversationNotFoundError(req.params.id);
+        current = detail;
+      }
+      res.json(current);
+    } catch (err) {
+      if (err instanceof ConversationNotFoundError) {
+        res.status(404).json({ error: "not-found" });
+        return;
+      }
+      res.status(400).json({
+        error: "patch-failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.delete("/conversations/:id", (req, res) => {
+    try {
+      deleteConversation(req.params.id);
+      res.json({ ok: true, id: req.params.id });
+    } catch (err) {
+      if (err instanceof ConversationNotFoundError) {
+        res.status(404).json({ error: "not-found" });
+        return;
+      }
+      res.status(400).json({
+        error: "delete-failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   app.get("/artifacts", (_req, res) => {
@@ -222,12 +309,23 @@ export function createApp() {
       if (!res.writableEnded) controller.abort();
     });
 
-    const events = runAgent({
-      messages: parsed.data.messages,
-      signal: controller.signal,
-      hasAttachment: parsed.data.hasAttachment,
-      attachmentName: parsed.data.attachmentName,
-    });
+    const lastUser = [...parsed.data.messages]
+      .reverse()
+      .find((m) => m.role === "user");
+
+    const events = withPersistedDone(
+      runAgent({
+        messages: parsed.data.messages,
+        signal: controller.signal,
+        hasAttachment: parsed.data.hasAttachment,
+        attachmentName: parsed.data.attachmentName,
+        preferModel: parsed.data.preferModel,
+      }),
+      {
+        conversationId: parsed.data.conversationId,
+        userContent: lastUser?.content ?? "",
+      },
+    );
     await pipeEvents(res, events);
   });
 
@@ -235,6 +333,7 @@ export function createApp() {
 }
 
 export async function listen(): Promise<void> {
+  migrate();
   const app = createApp();
   // Load the model registry before accepting requests so a malformed
   // models.yaml fails boot (repo bug) rather than the first chat request.
