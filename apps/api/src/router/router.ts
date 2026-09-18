@@ -25,22 +25,56 @@ export const routeDecisionSchema = z.object({
 export type RouteDecision = z.infer<typeof routeDecisionSchema>;
 
 const SYSTEM = `You route industrial plant questions for a sovereign workbench. Reply ONLY with JSON matching the schema. Choose:
-- store: "sql" for tag/inspection/numeric lookups, "vector" for SOP/procedure questions, "files" for uploaded scans/PDFs, "none" for general chat.
+- store: "sql" for tag/inspection/numeric lookups, "vector" for SOP/procedure/how-to questions, "files" for uploaded scans/PDFs, "none" ONLY for small talk that needs no plant data.
 - model: "chat" for SOP/answer, "vision" if the user attached an image/scan, "coder" for JS code, "nano" only for trivial rewrites.
 - tools: array of any of fs, ocr, sandbox, docx, search needed to complete the task.
 - reason: one short sentence.`;
+
+const PROCEDURE_WORDS =
+  /\b(sop|procedure|isolation|permit|leak test|lockout|checklist|how do i|how to|steps)\b/i;
+const INSPECTION_WORDS =
+  /\b(inspection|inspected|reading|calibration|history|last check|status)\b/i;
+const TAG_PATTERN = /\d{2}-[a-z]{1,3}-\d{3}/i;
+
+/**
+ * The nano router (qwen2.5:1.5b) sometimes answers "none" for questions that
+ * clearly need plant data, which starves the generator of context and invites
+ * invented citations. Correct obvious misroutes with a keyword guard, and say
+ * so in the reason so the Trace panel stays honest.
+ */
+function guardStore(query: string, decision: RouteDecision): RouteDecision {
+  if (decision.store !== "none") return decision;
+
+  const needsProcedure = PROCEDURE_WORDS.test(query);
+  const needsRecords = INSPECTION_WORDS.test(query) || TAG_PATTERN.test(query);
+  if (!needsProcedure && !needsRecords) return decision;
+
+  const store = needsProcedure ? "vector" : "sql";
+  return {
+    ...decision,
+    store,
+    tools: decision.tools.includes("search")
+      ? decision.tools
+      : [...decision.tools, "search"],
+    reason: `${decision.reason} (store corrected to ${store}: query references plant data)`,
+  };
+}
 
 export async function route(
   query: string,
   translated: TranslatedQuery,
   opts: { hasAttachment?: boolean } = {},
 ): Promise<RouteDecision> {
-  const userPrompt = `Original: ${query}
-Rewritten: ${translated.rewritten}
-Step-back: ${translated.stepBack}
-Sub-queries: ${translated.subQueries.join(" | ")}
-HyDE: ${translated.hyde}
-Attachment: ${opts.hasAttachment ? "yes (image/scan)" : "no"}`;
+  // Only mention the attachment when there is one — a "no" line tempts the
+  // nano model into reasoning about a file the user never sent.
+  const userPrompt = [
+    `Original: ${query}`,
+    `Rewritten: ${translated.rewritten}`,
+    `Step-back: ${translated.stepBack}`,
+    `Sub-queries: ${translated.subQueries.join(" | ")}`,
+    `HyDE: ${translated.hyde}`,
+    ...(opts.hasAttachment ? ["Attachment: yes (image/scan)"] : []),
+  ].join("\n");
 
   try {
     const res = await ollama().chat({
@@ -53,7 +87,7 @@ Attachment: ${opts.hasAttachment ? "yes (image/scan)" : "no"}`;
       ],
     });
     const parsed = JSON.parse(res.message.content);
-    return routeDecisionSchema.parse(parsed);
+    return guardStore(query, routeDecisionSchema.parse(parsed));
   } catch {
     // Fallback: a defensible default so the agent loop never stalls.
     return routeDecisionSchema.parse({

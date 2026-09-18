@@ -7,7 +7,8 @@
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "demo": "bun src/demo.ts",
-    "seed": "bun src/retrieve/seed.ts"
+    "seed": "bun src/retrieve/seed.ts",
+    "sandbox:prepull": "bun scripts/prepull-sandbox.ts"
   },
   "dependencies": {
     "docx": "^9.7.1",

@@ -17,7 +17,7 @@ If a package is not here, **do not add it** without updating this page and `memo
 | Embeddings | Ollama `nomic-embed-text` | OpenAI embeddings |
 | OCR | tesseract.js + pdfjs-dist (vendored traineddata) | Cloud Vision, Python RapidOCR |
 | Office | `docx`, exceljs, pptxgenjs | python-docx |
-| Sandbox | dockerode `node:22-alpine --network=none` (Docker-first; no isolated-vm — V8 addon cannot load under Bun/JSC) | `eval()`, unrestricted `child_process`, isolated-vm |
+| Sandbox | dockerode `node:22-alpine` / `python:3.12-alpine` `--network=none`; HTML/CSS via `nginx:alpine` bound to `127.0.0.1`. One fresh container per run, SIGTERM then SIGKILL. | `eval()`, unrestricted `child_process`, isolated-vm |
 | Config | `models.yaml` + zod | Hard-coded model names |
 | Logs | pino | LangSmith, cloud APM |
 | Schema | zod | Unvalidated `any` at boundaries |

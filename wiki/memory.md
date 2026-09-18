@@ -1,6 +1,6 @@
 # Memory (living)
 
-Last updated: 2026-09-14
+Last updated: 2026-09-18
 
 Agents: **read this first**. After a material change, add a line under Changelog. Do not delete locked facts. Strike them and write the replacement.
 
@@ -18,15 +18,15 @@ Agents: **read this first**. After a material change, add a line under Changelog
 - `data/` — `plant.sqlite` (seeded: 3 tags, 3 inspections, 16 KB chunks vectorized + FTS5), `kb/*.md` SOPs, `samples/` (tank_levels.csv, parseLevels.test.ts, inspection_scan.png, pid_c3.png), `vault/` (uploads + generated docx)
 - `vendor/eng.traineddata.gz` — vendored for offline tesseract (currently unused; vision model carries OCR)
 - `apps/web` — Next.js App Router (UI only), shadcn/ui, TanStack Query workbench shell
-- `apps/api` — Express on `127.0.0.1:8787`, `installAirgap()`, `GET /airgap/events`, `GET /models`, `GET /ollama/health`, `POST /chat` (SSE ReAct), `POST /inspect` (SSE inspection beat), `POST /upload`, `POST /sandbox`, `GET /artifacts`, `GET /artifacts/:name`
+- `apps/api` — Express on `127.0.0.1:8787`, `installAirgap()`, `GET /airgap/events`, `GET /models`, `GET /ollama/health`, `POST /chat` (SSE ReAct), `POST /inspect` (SSE inspection beat), `POST /upload`, `POST /sandbox`, `GET /sandbox/health`, `DELETE /sandbox/preview/:id`, `GET /artifacts`, `GET /artifacts/:name`
 - `apps/api/src/models/` — `models.yaml` loader (zod) + `ollama` client pinned to `127.0.0.1:11434` + health probe
 - `apps/api/src/query/` — `translate.ts` (rewrite/step-back/decompose/HyDE on nano model)
 - `apps/api/src/router/` — `router.ts` (store+model+tools+reason decision on nano model)
 - `apps/api/src/retrieve/` — `db.ts` (bun:sqlite + drizzle + sqlite-vec + FTS5), `schema.ts`, `embed.ts`, `retrieve.ts` (SQL + vector + FTS5 + rank top-5), `seed.ts`
 - `apps/api/src/agent/` — `events.ts`, `loop.ts` (`runAgent` full ReAct), `inspect.ts` (OCR/vision → findings → docx), `sse.ts`
-- `apps/api/src/tools/` — `fs.ts` (vault-scoped, path-traversal guard), `registry.ts` (search/fs/ocr/sandbox/docx), `ocr/index.ts`, `docx/writer.ts`, `sandbox/index.ts` (dockerode)
-- `apps/web` — chat (streams + attachment upload + inspect trigger), trace (live route/plan/observe via bus), meter, artifacts (list + download)
-- Root `package.json` workspaces (`apps/web`, `apps/api`); `bun run web`, `bun run api`, `bun run demo`
+- `apps/api/src/tools/` — `fs.ts` (vault-scoped, path-traversal guard), `registry.ts` (search/fs/ocr/sandbox/docx), `ocr/index.ts`, `docx/writer.ts`, `sandbox/index.ts` (dockerode, per-language ephemeral containers)
+- `apps/web` — chat (streams + attachment upload + inspect trigger + Run on Sandbox), trace (live route/plan/observe via bus), meter, artifacts (list + download)
+- Root `package.json` workspaces (`apps/web`, `apps/api`); `bun run web`, `bun run api`, `bun run demo`, `bun run sandbox:prepull`
 
 ## Does not exist (do not pretend it does)
 
@@ -48,7 +48,7 @@ Agents: **read this first**. After a material change, add a line under Changelog
 - Stores: one SQLite file (`data/plant.sqlite`) for SQL + sqlite-vec + FTS5. Files on disk in `data/vault/`.
 - ~~Default GPU pack: 12 GB — Qwen2-VL-2B (vision).~~ Official Ollama dropped `qwen2-vl`. Vision tag is **`qwen2.5vl:3b`**.
 - Default GPU pack: 12 GB — Qwen2.5-1.5B (router), Qwen2.5-7B-Instruct (chat), Qwen2.5-VL-3B (vision), Qwen2.5-Coder-7B (swap), nomic-embed-text.
-- Coding beat language: **JavaScript/TypeScript**. ~~`isolated-vm` (Docker fallback).~~ **Docker-first** via `dockerode` `node:22-alpine --network=none` (isolated-vm cannot load under Bun/JSC).
+- Coding beat language: **JavaScript/TypeScript**. ~~`isolated-vm` (Docker fallback).~~ **Docker-first** via `dockerode`: one fresh container per run. JS/TS → `node:22-alpine --network=none`; Python → `python:3.12-alpine --network=none`; HTML/CSS → `nginx:alpine` bound to `127.0.0.1`. SIGTERM (2s) then SIGKILL. (isolated-vm cannot load under Bun/JSC).
 - Word output: npm `docx`, artifact name `approval_note.docx`.
 - New models: `models.yaml` + zod. Not a code rewrite.
 
@@ -59,6 +59,11 @@ Agents: **read this first**. After a material change, add a line under Changelog
 
 ## Changelog
 
+- 2026-09-18 — Docker sandbox is multi-language and wired to **Run on Sandbox**. One ephemeral container per click (`node:22-alpine` / `python:3.12-alpine` / `nginx:alpine`). Graceful stop is SIGTERM then SIGKILL; `GET /sandbox/health` + `DELETE /sandbox/preview/:id`; venue pre-pull `bun run sandbox:prepull`. UI shows stdout/stderr, exit chip, HTML iframe preview, and the image/net/cpu/mem trace line.
+- 2026-09-18 — Chat code fences use a local tokenizer (`apps/web/lib/highlight.ts`) for HTML/CSS/JS/TS/Python/JSON token colors. No Shiki/streamdown (not on the stack).
+- 2026-09-18 — Chat renders fenced code (html/css/js/ts/python and others) as a code block with copy. Runnable languages get a **Run on Sandbox** button (disabled while the fence is still streaming or Docker is down). Parser: `apps/web/lib/message-segments.ts`.
+- 2026-09-14 — Router store guard: nano (`qwen2.5:1.5b`) answered `store: "none"` for SOP/tag questions, so the generator got no context and invented `sop_isolation.md` citations. Added `guardStore()` keyword override (procedure → vector, tag/inspection → sql, appends the correction to `reason` so Trace stays honest) and a no-fabrication rule in the generate system prompt. Few-shot examples were tried first and made it worse — the 1.5b model copies the last example.
+- 2026-09-14 — Web UI pass: chat composer is one bordered block (attach + `Ask anything…` textarea + icon send/stop, Enter hint), attachment shown as a removable chip, empty state has click-to-fill suggestions, messages are left/right bubbles with auto-scroll. Trace renders store/model/tools as badges + reason/plan/observe sections. Artifacts rows are hover-rows with count badge.
 - 2026-09-14 — Artifacts delete: `vaultDelete` + `DELETE /artifacts/:name`; web trash button with confirm. `vaultList` hides `.gitkeep` and non-files; download URLs encoded.
 - 2026-09-14 — Attachment routing: summary/Q&A uses `/chat` with `attachmentName` (PDF text via pdfjs injected into agent context); inspection beat only when message matches inspect intent. PDFs skip broken Ollama vision pass when text layer exists.
 - 2026-09-14 — Fix inspect/chat SSE abort: `req.on("close")` fired after the JSON body was read, aborting before inspect summary tokens; use `res.on("close")` when `!res.writableEnded`. Web inspect SSE parser flushes trailing buffer; chat clears streaming state after inspect.

@@ -9,6 +9,7 @@
     "web:start": "bun run --filter web start",
     "api": "bun run --filter api dev",
     "api:start": "bun run --filter api start",
-    "demo": "bun run --filter web build && bun run --filter api demo"
+    "demo": "bun run --filter web build && bun run --filter api demo",
+    "sandbox:prepull": "bun run --filter api sandbox:prepull"
   }
 }

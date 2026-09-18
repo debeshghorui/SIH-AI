@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { installAirgap } from "./airgap/install";
+import { shutdownSandbox } from "./tools/sandbox";
 
 installAirgap();
 
@@ -18,13 +19,18 @@ const child = spawn("bun", ["run", "start"], {
   },
 });
 
-const shutdown = () => {
+const shutdown = async () => {
   child.kill("SIGTERM");
+  await shutdownSandbox();
   process.exit(0);
 };
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.on("SIGINT", () => {
+  void shutdown();
+});
+process.on("SIGTERM", () => {
+  void shutdown();
+});
 
 child.on("exit", (code) => {
   process.exit(code ?? 1);

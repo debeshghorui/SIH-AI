@@ -28,6 +28,10 @@ When you add a real module, append one line under **Created** and date it.
 
 ## Created
 
+- 2026-09-18 — `apps/api/scripts/prepull-sandbox.ts`; `apps/web/lib/query/sandbox.ts`; `apps/web/components/sandbox-output.tsx`. Sandbox routes: `GET /sandbox/health`, `DELETE /sandbox/preview/:id`.
+- 2026-09-18 — `apps/web/lib/highlight.ts` (offline token colors for chat code fences)
+- 2026-09-14 — `apps/web/lib/attachment-intent.ts` (chat vs inspection-beat routing for an attached file)
+
 - 2026-09-14 — `apps/api/src/retrieve/` (`db.ts`, `schema.ts`, `embed.ts`, `retrieve.ts`, `seed.ts`); `apps/api/src/query/translate.ts`; `apps/api/src/router/router.ts`; `apps/api/src/tools/` (`fs.ts`, `registry.ts`, `ocr/index.ts`, `docx/writer.ts`, `sandbox/index.ts`); `apps/api/src/agent/inspect.ts`; routes `POST /inspect`, `POST /upload`, `POST /sandbox`, `GET /artifacts`, `GET /artifacts/:name`; web `lib/query/inspect.ts`, `lib/query/trace-bus.ts`, `trace.tsx` live, `artifacts.tsx` list+download, `chat.tsx` attachment+inspect; `data/kb/*.md`, `data/samples/*`, `vendor/eng.traineddata.gz`; `data/plant.sqlite` seeded
 - 2026-09-14 — `apps/api/src/agent/` (`events.ts`, `loop.ts`, `sse.ts`); `POST /chat` SSE in `server.ts`; `apps/web/lib/query/chat.ts` (`streamChat`); `apps/web/components/chat.tsx` streaming UI
 - 2026-09-14 — `apps/api/src/models/` (`schema.ts`, `registry.ts`, `client.ts`, `health.ts`); `GET /models`, `GET /ollama/health` in `server.ts`; air-gap log split rings in `src/airgap/log.ts`

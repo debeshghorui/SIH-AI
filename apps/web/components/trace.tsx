@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -9,7 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { subscribeTrace } from "@/lib/query/trace-bus";
 import type { AgentEvent } from "@/lib/query/chat";
 
@@ -43,58 +43,73 @@ export function Trace() {
     });
   }, []);
 
-  const fields = [
-    { key: "store", value: trace.store, hint: "sql · vector · files · none" },
-    { key: "model", value: trace.model, hint: "nano · chat · coder · vision" },
-    { key: "tools", value: trace.tools?.join(", "), hint: "fs · ocr · sandbox · docx · search" },
-    { key: "reason", value: trace.reason, hint: "one sentence from the router" },
-  ] as const;
+  const hasRun = Boolean(
+    trace.plan || trace.reason || trace.store || trace.observe,
+  );
 
   return (
-    <Card className="h-full">
+    <Card className="flex h-full min-h-0 flex-col">
       <CardHeader className="border-b">
         <CardTitle>Agent trace</CardTitle>
         <CardDescription>
-          {trace.reason ? "Live router output." : "No run yet."}
+          {hasRun ? "Live from the Express agent loop." : "No run yet."}
         </CardDescription>
       </CardHeader>
-      <CardContent className="flex flex-col gap-3 pt-(--card-spacing)">
-        {trace.plan && (
-          <div className="rounded-md bg-muted/50 p-2">
-            <p className="font-mono text-xs uppercase tracking-wide text-muted-foreground">
-              plan
+      <CardContent className="min-h-0 flex-1 pt-(--card-spacing)">
+        <ScrollArea className="h-full pr-3">
+          {!hasRun ? (
+            <p className="text-sm text-muted-foreground">
+              Send a message to see which store, model, and tools the router
+              picked — and why.
             </p>
-            <p className="mt-1 text-xs leading-5">{trace.plan}</p>
-          </div>
-        )}
-        {fields.map((field, i) => (
-          <div key={field.key}>
-            {i > 0 || trace.plan ? <Separator className="mb-3" /> : null}
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="font-mono text-xs uppercase tracking-wide text-muted-foreground">
-                {field.key}
-              </span>
-              <Badge variant={field.value ? "default" : "outline"}>
-                {field.value ?? "—"}
-              </Badge>
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {trace.store && (
+                  <Badge variant="secondary">store · {trace.store}</Badge>
+                )}
+                {trace.model && (
+                  <Badge variant="secondary">model · {trace.model}</Badge>
+                )}
+                {trace.tools?.map((tool) => (
+                  <Badge key={tool} variant="outline">
+                    {tool}
+                  </Badge>
+                ))}
+              </div>
+
+              {trace.reason && (
+                <Section label="reason">{trace.reason}</Section>
+              )}
+              {trace.plan && <Section label="plan">{trace.plan}</Section>}
+              {trace.observe && (
+                <Section label={`observe · ${trace.observe.tool}`}>
+                  {trace.observe.result.slice(0, 600)}
+                </Section>
+              )}
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">{field.hint}</p>
-          </div>
-        ))}
-        {trace.observe && (
-          <>
-            <Separator className="mb-3" />
-            <div className="rounded-md bg-muted/50 p-2">
-              <p className="font-mono text-xs uppercase tracking-wide text-muted-foreground">
-                observe · {trace.observe.tool}
-              </p>
-              <p className="mt-1 whitespace-pre-wrap text-xs leading-5">
-                {trace.observe.result.slice(0, 400)}
-              </p>
-            </div>
-          </>
-        )}
+          )}
+        </ScrollArea>
       </CardContent>
     </Card>
+  );
+}
+
+function Section({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="font-mono text-[0.65rem] tracking-wide text-muted-foreground uppercase">
+        {label}
+      </p>
+      <p className="whitespace-pre-wrap text-xs leading-5 text-foreground/90">
+        {children}
+      </p>
+    </div>
   );
 }

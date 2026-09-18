@@ -7,18 +7,20 @@ export function Workbench() {
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-background">
       <header className="flex items-center justify-between gap-4 border-b px-6 py-3">
-        <div>
-          <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+        <div className="flex items-baseline gap-3">
+          <h1 className="font-heading text-lg font-medium">
+            Sovereign workbench
+          </h1>
+          <p className="text-xs tracking-wide text-muted-foreground uppercase">
             SIH 26117 · MRPL
           </p>
-          <h1 className="text-lg font-medium">Sovereign workbench</h1>
         </div>
         <Meter />
       </header>
-      <main className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4 md:grid-cols-[minmax(0,1.4fr)_minmax(18rem,0.9fr)]">
+      <main className="grid min-h-0 flex-1 gap-4 overflow-hidden p-4 md:grid-cols-[minmax(0,1.4fr)_minmax(20rem,0.9fr)]">
         <Chat />
-        <aside className="flex min-h-0 flex-col gap-4 overflow-auto">
-          <div className="min-h-0 flex-1">
+        <aside className="flex min-h-0 flex-col gap-4 overflow-y-auto">
+          <div className="min-h-64 flex-1">
             <Trace />
           </div>
           <Artifacts />

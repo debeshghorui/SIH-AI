@@ -117,7 +117,9 @@ export async function* runAgent(
 
   const answerModel = getModel(decision.model === "vision" ? "chat" : decision.model);
   const systemContent =
-    "You are the MRPL sovereign workbench assistant. Answer concisely about plant SOPs, isolation, and approval notes. Cite sources as (1), (2), ... using the context. If context is empty, answer from general knowledge and say so." +
+    "You are the MRPL sovereign workbench assistant. Answer concisely about plant SOPs, isolation, and approval notes. " +
+    "Cite sources only as (1), (2), ... matching the numbered context below. Never invent a source, filename, or citation number that is not in the context. " +
+    "If there is no context, answer from general knowledge and state plainly that no plant document was retrieved." +
     (attachmentContext
       ? `\n\nAttached document (${input.attachmentName}):\n${attachmentContext.slice(0, 6000)}`
       : "") +

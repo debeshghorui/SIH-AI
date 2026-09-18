@@ -12,6 +12,10 @@ Rehearse until boring. Eight minutes. Airplane mode.
 | 6:40 | Network log | Only `127.0.0.1` |
 | 7:20 | Open `models.yaml` | New model = a row, not a rewrite |
 
+## Venue
+
+Pre-pull sandbox images once (online or from a cache): `bun run sandbox:prepull` (`node:22-alpine`, `python:3.12-alpine`, `nginx:alpine`). Docker Desktop must be running for the coding beat.
+
 ## Sample pack (create later, no MRPL data)
 
 - `data/samples/inspection_scan.pdf`

@@ -8,7 +8,18 @@ import { runAgent } from "./agent/loop";
 import { runInspect } from "./agent/inspect";
 import { pipeEvents } from "./agent/sse";
 import { vaultList, resolveVaultPath, vaultWrite, vaultDelete } from "./tools/fs";
-import { runSandbox } from "./tools/sandbox";
+import {
+  isPreviewLanguage,
+  normalizeLanguage,
+  reapOrphanSandboxes,
+  runHtmlPreview,
+  runSandbox,
+  sandboxHealth,
+  sandboxInputSchema,
+  shutdownSandbox,
+  stopPreview,
+  UnsupportedLanguageError,
+} from "./tools/sandbox";
 
 const log = pino({ name: "api" });
 
@@ -29,6 +40,28 @@ const chatRequestSchema = z.object({
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
+
+  // Raw upload must be registered before express.json() so the JSON parser
+  // does not consume the request body stream first.
+  app.post("/upload", express.raw({ type: "*/*", limit: "20mb" }), (req, res) => {
+    const name = req.query.name;
+    if (typeof name !== "string" || !name) {
+      res.status(400).json({ error: "missing ?name=" });
+      return;
+    }
+    try {
+      const bytes = (req.body as unknown as Uint8Array)?.length ?? 0;
+      vaultWrite(name, req.body as unknown as string);
+      log.info({ name, bytes }, "vault upload");
+      res.json({ ok: true, name });
+    } catch (err) {
+      res.status(400).json({
+        error: "upload-failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/airgap/events", (_req, res) => {
@@ -74,49 +107,72 @@ export function createApp() {
     }
   });
 
-  // Upload a scan to the vault. Accepts raw body (the file bytes) with a
-  // ?name= query for the vault filename. Keeps the agent host stateless.
-  app.post("/upload", express.raw({ type: "*/*", limit: "20mb" }), (req, res) => {
-    const name = req.query.name;
-    if (typeof name !== "string" || !name) {
-      res.status(400).json({ error: "missing ?name=" });
-      return;
-    }
-    try {
-      vaultWrite(name, req.body as unknown as string);
-      log.info({ name, bytes: (req.body as unknown as Uint8Array).length }, "vault upload");
-      res.json({ ok: true, name });
-    } catch (err) {
-      res.status(400).json({
-        error: "upload-failed",
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
+  app.get("/sandbox/health", async (_req, res) => {
+    res.json(await sandboxHealth());
   });
 
-  // Coding beat: run JS in a disposable Docker container (--network=none).
-  const sandboxInputSchema = z.object({
-    code: z.string().min(1),
-    tests: z.string().optional(),
+  app.delete("/sandbox/preview/:id", async (req, res) => {
+    const id = req.params.id;
+    if (!id) {
+      res.status(400).json({ error: "missing-id" });
+      return;
+    }
+    const result = await stopPreview(id);
+    res.json(result);
   });
+
+  // One fresh container per run. JS/TS/Python: --network=none.
+  // HTML/CSS: nginx bound to 127.0.0.1. Client abort → SIGTERM then SIGKILL.
   app.post("/sandbox", async (req, res) => {
     const parsed = sandboxInputSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "bad-request", issues: parsed.error.issues });
       return;
     }
+    const lang = normalizeLanguage(parsed.data.language);
+    if (!lang) {
+      res.status(400).json({
+        error: "unsupported-language",
+        language: parsed.data.language,
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+    const onClose = () => {
+      if (!res.writableEnded) controller.abort();
+    };
+    res.on("close", onClose);
+
     try {
-      const result = await runSandbox(parsed.data);
+      if (isPreviewLanguage(lang)) {
+        const result = await runHtmlPreview({
+          code: parsed.data.code,
+          language: lang,
+          sessionId: parsed.data.sessionId,
+        });
+        res.json(result);
+        return;
+      }
+      const result = await runSandbox(parsed.data, controller.signal);
       res.json(result);
     } catch (err) {
+      if (err instanceof UnsupportedLanguageError) {
+        res.status(400).json({ error: "unsupported-language", language: err.language });
+        return;
+      }
       log.error({ err }, "sandbox failed");
       res.status(500).json({
+        kind: "run",
         ok: false,
         stdout: "",
         stderr: err instanceof Error ? err.message : String(err),
         exitCode: -1,
         timedOut: false,
+        aborted: false,
       });
+    } finally {
+      res.off("close", onClose);
     }
   });
 
@@ -191,6 +247,14 @@ export async function listen(): Promise<void> {
     });
     server.on("error", reject);
   });
+
+  const onSignal = () => {
+    void shutdownSandbox().finally(() => process.exit(0));
+  };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+
+  void reapOrphanSandboxes();
 
   // One boot-time probe. A down Ollama or a missing tag is a warning, not a
   // boot failure — Express keeps serving and the UI can show the gap.

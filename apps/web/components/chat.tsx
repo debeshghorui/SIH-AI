@@ -1,7 +1,15 @@
 "use client";
 
-import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { Paperclip } from "lucide-react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowUp, CornerDownLeft, Paperclip, Square, X } from "lucide-react";
+import { ChatMessageBody } from "@/components/chat-message-body";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -33,6 +41,12 @@ type DisplayMessage = {
 const SYSTEM_PROMPT =
   "You are the MRPL sovereign workbench assistant. Answer concisely about plant SOPs, isolation procedures, and approval notes. If you do not know, say so.";
 
+const SUGGESTIONS = [
+  "SOP for 12-P-104 isolation",
+  "Last inspection on 12-P-104",
+  "Summarise the attached document",
+];
+
 export function Chat() {
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -40,6 +54,13 @@ export function Chat() {
   const [attachment, setAttachment] = useState<File | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const queryClient = useQueryClient();
+
+  // Keep the newest message in view as tokens stream in.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [messages]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -105,12 +126,17 @@ export function Chat() {
       { role: "user", content: userMsg.content },
     ];
 
+    async function afterUpload(name: string) {
+      await queryClient.invalidateQueries({ queryKey: ["artifacts"] });
+      return name;
+    }
+
     if (attachment && wantsInspectionBeat(text, attachment)) {
       // Demo beat 2: scan → findings → approval_note.docx
       const tagMatch = text.match(/(\d{2}-[A-Z]{1,3}-\d{3})/i);
       const tag = tagMatch?.[1]?.toUpperCase() ?? "12-P-104";
       try {
-        const name = await uploadToVault(attachment);
+        const name = await afterUpload(await uploadToVault(attachment));
         await streamInspect({ name, tag, signal: controller.signal, onEvent });
       } catch (err) {
         if (!controller.signal.aborted) {
@@ -131,7 +157,7 @@ export function Chat() {
     } else if (attachment) {
       // Summary / Q&A over an uploaded PDF or image — chat with vault text.
       try {
-        const name = await uploadToVault(attachment);
+        const name = await afterUpload(await uploadToVault(attachment));
         await streamChat({
           messages: history,
           signal: controller.signal,
@@ -156,8 +182,7 @@ export function Chat() {
     }
 
     if (attachment) {
-      setAttachment(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      clearAttachment();
     }
 
     setBusy(false);
@@ -167,6 +192,11 @@ export function Chat() {
   function onPickFile(event: ChangeEvent<HTMLInputElement>) {
     const f = event.target.files?.[0];
     if (f) setAttachment(f);
+  }
+
+  function clearAttachment() {
+    setAttachment(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   function stop() {
@@ -182,51 +212,77 @@ export function Chat() {
       <CardHeader className="border-b">
         <CardTitle>Chat</CardTitle>
         <CardDescription>
-          Streams from Express /chat → Ollama qwen2.5:7b-instruct on
-          127.0.0.1:11434. Loopback only.
+          Local agent on 127.0.0.1 · nothing leaves this machine.
         </CardDescription>
       </CardHeader>
+
       <CardContent className="min-h-0 flex-1 pt-(--card-spacing)">
         <ScrollArea className="h-full pr-3">
           {messages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Ask a SOP question for tag 12-P-104, or paste a finding. The
-              agent loop lives in Express, not in this Next app.
-            </p>
+            <div className="flex flex-col gap-4 py-2">
+              <div className="space-y-1">
+                <p className="text-sm font-medium">
+                  Ask about a tag, a procedure, or a document.
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Attach a scan to summarise it, or ask to inspect it and get
+                  an approval note.
+                </p>
+              </div>
+              <div className="flex flex-col gap-1">
+                {SUGGESTIONS.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => setDraft(suggestion)}
+                    className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <CornerDownLeft className="size-3.5 shrink-0 opacity-60" />
+                    <span className="truncate">{suggestion}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ) : (
-            <ul className="flex flex-col gap-3">
+            <ul className="flex flex-col gap-4 pb-1">
               {messages.map((message) => (
                 <li
                   key={message.id}
                   className={
                     message.role === "user"
-                      ? "ml-8 rounded-lg bg-secondary px-3 py-2"
-                      : "mr-8 rounded-lg bg-muted px-3 py-2"
+                      ? "flex flex-col items-end gap-1"
+                      : "flex flex-col items-start gap-1"
                   }
                 >
-                  <p className="text-[0.65rem] font-medium uppercase tracking-wide text-muted-foreground">
-                    {message.role}
-                  </p>
-                  <p
+                  <span className="px-1 text-[0.65rem] font-medium tracking-wide text-muted-foreground uppercase">
+                    {message.role === "user" ? "You" : "Assistant"}
+                  </span>
+                  <div
                     className={
-                      message.error
-                        ? "mt-1 text-sm leading-6 text-destructive"
-                        : "mt-1 whitespace-pre-wrap text-sm leading-6"
+                      message.role === "user"
+                        ? "max-w-[85%] rounded-2xl rounded-tr-sm bg-secondary px-3.5 py-2.5"
+                        : "max-w-[92%] rounded-2xl rounded-tl-sm bg-muted px-3.5 py-2.5"
                     }
                   >
-                    {message.content}
-                    {message.streaming ? (
-                      <span className="ml-0.5 inline-block h-3 w-1.5 animate-pulse bg-muted-foreground/60 align-middle" />
-                    ) : null}
-                  </p>
+                    <ChatMessageBody
+                      content={message.content}
+                      error={message.error}
+                      streaming={message.streaming}
+                    />
+                  </div>
                 </li>
               ))}
+              <div ref={bottomRef} />
             </ul>
           )}
         </ScrollArea>
       </CardContent>
-      <CardFooter>
-        <form className="flex w-full items-end gap-2" onSubmit={onSubmit}>
+
+      <CardFooter className="flex-col items-stretch gap-0">
+        <form
+          className="flex flex-col gap-2 rounded-xl border border-input bg-background p-2 transition-colors focus-within:border-ring dark:bg-input/30"
+          onSubmit={onSubmit}
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -234,15 +290,28 @@ export function Chat() {
             className="hidden"
             onChange={onPickFile}
           />
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={() => fileInputRef.current?.click()}
-            aria-label="Attach scan"
-          >
-            <Paperclip />
-          </Button>
+
+          {attachment && (
+            <div className="flex items-center gap-2 self-start rounded-lg bg-muted px-2 py-1">
+              <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="max-w-56 truncate font-mono text-xs">
+                {attachment.name}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {(attachment.size / 1024).toFixed(0)} KB
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Remove attachment"
+                onClick={clearAttachment}
+              >
+                <X />
+              </Button>
+            </div>
+          )}
+
           <Textarea
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
@@ -253,28 +322,49 @@ export function Chat() {
               }
             }}
             placeholder={
-              attachment
-                ? `Ask about ${attachment.name} — summary, SOP, or inspect 12-P-104…`
-                : "SOP for 12-P-104 isolation…"
+              attachment ? "Ask about this file…" : "Ask anything…"
             }
-            rows={2}
-            className="min-h-16 flex-1"
+            rows={1}
+            className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-1.5 py-1.5 focus-visible:ring-0 dark:bg-transparent"
           />
-          {busy ? (
-            <Button type="button" variant="outline" onClick={stop}>
-              Stop
+
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Attach a scan or PDF"
+            >
+              <Paperclip />
             </Button>
-          ) : (
-            <Button type="submit" disabled={!draft.trim()}>
-              Send
-            </Button>
-          )}
+
+            {busy ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                onClick={stop}
+                aria-label="Stop generating"
+              >
+                <Square />
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                size="icon-sm"
+                disabled={!draft.trim()}
+                aria-label="Send message"
+              >
+                <ArrowUp />
+              </Button>
+            )}
+          </div>
         </form>
-        {attachment && (
-          <p className="mt-2 text-xs text-muted-foreground">
-            attached: {attachment.name} ({(attachment.size / 1024).toFixed(1)} KB)
-          </p>
-        )}
+
+        <p className="px-1 pt-2 pb-1 text-xs text-muted-foreground">
+          Enter to send · Shift + Enter for a new line
+        </p>
       </CardFooter>
     </Card>
   );

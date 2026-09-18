@@ -3,7 +3,13 @@ import { retrieve, type Citation } from "../retrieve/retrieve";
 import { vaultList } from "./fs";
 import { extractFindings } from "./ocr";
 import { writeApprovalNote, type ApprovalNote } from "./docx/writer";
-import { runSandbox, type SandboxResult } from "./sandbox";
+import {
+  isPreviewLanguage,
+  normalizeLanguage,
+  runHtmlPreview,
+  runSandbox,
+  type SandboxResult,
+} from "./sandbox";
 
 /**
  * Tool registry. Each tool has a name, an input schema, and a handler that
@@ -65,13 +71,37 @@ export const tools: Record<string, Tool> = {
   },
   sandbox: {
     name: "sandbox",
-    description: "Run JavaScript in an isolated Docker container (--network=none).",
-    input: z.object({ code: z.string(), tests: z.string().optional() }),
+    description:
+      "Run JS/TS/Python in an isolated Docker container (--network=none), or preview HTML/CSS via nginx on 127.0.0.1.",
+    input: z.object({
+      code: z.string(),
+      tests: z.string().optional(),
+      language: z.string().optional(),
+    }),
     async run(raw) {
       const parsed = z
-        .object({ code: z.string(), tests: z.string().optional() })
+        .object({
+          code: z.string(),
+          tests: z.string().optional(),
+          language: z.string().optional(),
+        })
         .parse(raw);
-      const result: SandboxResult = await runSandbox(parsed);
+      const lang = normalizeLanguage(parsed.language ?? "js");
+      if (!lang) return `unsupported-language: ${parsed.language}`;
+      if (isPreviewLanguage(lang)) {
+        const preview = await runHtmlPreview({
+          code: parsed.code,
+          language: lang,
+        });
+        return preview.ok
+          ? `preview ${preview.previewUrl} expires ${preview.expiresAt}`
+          : `preview failed: ${preview.stderr}`;
+      }
+      const result: SandboxResult = await runSandbox({
+        code: parsed.code,
+        tests: parsed.tests,
+        language: lang === "python" ? "python" : lang === "ts" ? "ts" : "js",
+      });
       return `exit=${result.exitCode} ok=${result.ok}\nstdout:\n${result.stdout.slice(0, 800)}\nstderr:\n${result.stderr.slice(0, 400)}`;
     },
   },
