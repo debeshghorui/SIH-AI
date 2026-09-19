@@ -12,11 +12,10 @@ import {
 } from "./sandbox";
 
 /**
- * Tool registry. Each tool has a name, an input schema, and a handler that
- * returns a string observation for the agent. The router advertises tool
- * names; the agent loop calls the ones it needs. Today only `search` is
- * wired; `ocr`, `sandbox`, `docx` are registered as stubs so the router
- * can name them and the loop can fail gracefully until their phases land.
+ * Tool registry. Each tool has a name, an input schema, and a handler.
+ * The router may name `sandbox`; the ReAct loop does not call it. Studio
+ * runs project files via POST /sandbox. OCR/fs/docx/search are used by
+ * the inspect/chat paths.
  */
 
 export const toolInputSchema = z.object({

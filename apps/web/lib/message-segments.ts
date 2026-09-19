@@ -21,11 +21,57 @@ export function isRunnableLanguage(language: string): boolean {
 
 export type MessageSegment =
   | { type: "text"; text: string }
-  | { type: "code"; language: string; code: string; closed: boolean };
+  | {
+      type: "code";
+      language: string;
+      code: string;
+      closed: boolean;
+      filename?: string;
+    };
+
+function looksLikeFilename(token: string): boolean {
+  return /^[\w./-]+\.[A-Za-z0-9]+$/.test(token) && !token.startsWith(".");
+}
+
+function mergeFilenameFences(segments: MessageSegment[]): MessageSegment[] {
+  const out: MessageSegment[] = [];
+  for (const seg of segments) {
+    const prev = out[out.length - 1];
+    if (
+      seg.type === "text" &&
+      !seg.text.trim() &&
+      prev?.type === "code" &&
+      !prev.code.trim() &&
+      prev.filename
+    ) {
+      continue;
+    }
+    if (
+      seg.type === "code" &&
+      prev?.type === "code" &&
+      !prev.code.trim() &&
+      prev.filename
+    ) {
+      out[out.length - 1] = {
+        type: "code",
+        language: seg.language || prev.language,
+        code: seg.code,
+        closed: seg.closed,
+        filename: seg.filename ?? prev.filename,
+      };
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.filter((s) =>
+    s.type === "text" ? Boolean(s.text.trim()) : Boolean(s.code.trim()),
+  );
+}
 
 /**
  * Split assistant/user text on markdown fences.
- * Handles ```lang\\ncode```, same-line ```lang code```, and an unclosed fence while streaming.
+ * Handles ```lang\\ncode```, ```lang filename```, same-line ```lang code```,
+ * and an unclosed fence while streaming.
  */
 export function splitMessageSegments(content: string): MessageSegment[] {
   const segments: MessageSegment[] = [];
@@ -39,18 +85,38 @@ export function splitMessageSegments(content: string): MessageSegment[] {
       if (text) segments.push({ type: "text", text });
     }
 
-    const header = match[1] ?? "";
-    const langToken = header.trim().split(/\s+/, 1)[0] ?? "";
-    const language = langToken.toLowerCase();
-    const headerRest = header.trim().slice(langToken.length).trimStart();
+    const tokens = (match[1] ?? "").trim().split(/\s+/).filter(Boolean);
+    let language = "";
+    let filename: string | undefined;
+    const inline: string[] = [];
+    for (const token of tokens) {
+      if (!language && !looksLikeFilename(token)) {
+        language = token.toLowerCase();
+        continue;
+      }
+      if (!filename && looksLikeFilename(token)) {
+        filename = token.replace(/\\/g, "/");
+        continue;
+      }
+      inline.push(token);
+    }
     const rawBody = match[2] ?? "";
-    const code = (headerRest ? `${headerRest}\n${rawBody}` : rawBody).replace(
-      /\n$/,
-      "",
-    );
+    let code = [inline.join(" "), rawBody]
+      .filter((part) => part.length > 0)
+      .join("\n")
+      .replace(/\n$/, "");
+    if (!filename && looksLikeFilename(code.trim())) {
+      filename = code.trim();
+      code = "";
+    }
     const closed = match[3] === "```";
-
-    segments.push({ type: "code", language, code, closed });
+    segments.push({
+      type: "code",
+      language,
+      code,
+      closed,
+      ...(filename ? { filename } : {}),
+    });
     last = match.index + match[0].length;
   }
 
@@ -59,5 +125,6 @@ export function splitMessageSegments(content: string): MessageSegment[] {
     if (text) segments.push({ type: "text", text });
   }
 
-  return segments.length > 0 ? segments : [{ type: "text", text: content }];
+  const merged = mergeFilenameFences(segments);
+  return merged.length > 0 ? merged : [{ type: "text", text: content }];
 }

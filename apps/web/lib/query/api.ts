@@ -43,6 +43,18 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export async function apiPut<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, path);
+  }
+  return res.json() as Promise<T>;
+}
+
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(path, {
     method: "PATCH",

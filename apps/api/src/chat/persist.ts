@@ -1,4 +1,9 @@
 import type { AgentEvent } from "../agent/events";
+import {
+  hasRunnableFences,
+  isCodingTurn,
+  materializeProject,
+} from "../agent/code-files";
 import { appendMessages, createConversation } from "./sessions";
 
 /**
@@ -30,6 +35,21 @@ export async function* withPersistedDone(
             message: err instanceof Error ? err.message : String(err),
           };
           return;
+        }
+      }
+      if (conversationId && !failed && assistant.trim()) {
+        const written = materializeProject(conversationId, assistant, {
+          allowUnnamed:
+            isCodingTurn(input.userContent) || hasRunnableFences(assistant),
+        });
+        if (written.length > 0) {
+          yield {
+            type: "step",
+            stage: "tool",
+            title: "Save project files",
+            detail: `Wrote ${written.join(", ")} to the chat project. Sandbox was not started.`,
+            data: { tool: "fs" },
+          };
         }
       }
       yield { type: "done", conversationId };

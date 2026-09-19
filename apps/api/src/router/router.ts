@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ollama } from "../models/client";
 import { getModel } from "../models/registry";
 import { nearDuplicate, type TranslatedQuery } from "../query/translate";
+import { looksLikeCodeRequest } from "../agent/code-files";
 
 /**
  * Router. Decides, for a translated query:
@@ -33,8 +34,8 @@ export type RouteResult = {
 };
 
 const SYSTEM = `You route industrial plant questions for a sovereign workbench. Reply ONLY with JSON matching the schema. Choose:
-- store: "sql" for tag/inspection/numeric lookups, "vector" for SOP/procedure/how-to questions, "files" for uploaded scans/PDFs, "none" ONLY for small talk that needs no plant data.
-- model: "chat" for SOP/answer, "vision" if the user attached an image/scan, "coder" for JS code, "nano" only for trivial rewrites.
+- store: "sql" for tag/inspection/numeric lookups, "vector" for SOP/procedure/how-to questions, "files" for uploaded scans/PDFs, "none" for small talk AND for write-code requests (HTML/CSS/JS/Python) that need no plant data.
+- model: "chat" for SOP/answer, "vision" if the user attached an image/scan, "coder" for writing or editing HTML/CSS/JS/TS/Python files, "nano" only for trivial rewrites.
 - tools: array of any of fs, ocr, sandbox, docx, search needed to complete the task.
 - reason: one short sentence.`;
 
@@ -68,10 +69,32 @@ function guardStore(query: string, decision: RouteDecision): RouteDecision {
   };
 }
 
+/**
+ * Nano often routes "write an HTML file" to chat+vector, which dumps SOP
+ * chunks into generate and the model refuses to create files. Force coder
+ * and skip plant retrieve on coding turns.
+ */
+function guardCoding(
+  query: string,
+  decision: RouteDecision,
+  coding?: boolean,
+): RouteDecision {
+  if (decision.model === "vision") return decision;
+  const hit = coding ?? looksLikeCodeRequest(query);
+  if (!hit) return decision;
+  if (decision.store === "none" && decision.model === "coder") return decision;
+  return {
+    ...decision,
+    store: "none",
+    model: "coder",
+    reason: `${decision.reason} (coding turn: store none, model coder)`,
+  };
+}
+
 export async function route(
   query: string,
   translated: TranslatedQuery,
-  opts: { hasAttachment?: boolean } = {},
+  opts: { hasAttachment?: boolean; coding?: boolean } = {},
 ): Promise<RouteResult> {
   // Only mention the attachment when there is one — a "no" line tempts the
   // nano model into reasoning about a file the user never sent.
@@ -103,11 +126,14 @@ export async function route(
     });
     const parsed = JSON.parse(res.message.content);
     const nano = routeDecisionSchema.parse(parsed);
-    const decision = guardStore(query, nano);
+    const decision = opts.hasAttachment
+      ? guardStore(query, nano)
+      : guardCoding(query, guardStore(query, nano), opts.coding);
     return {
       decision,
       nano,
-      guarded: decision.store !== nano.store,
+      guarded:
+        decision.store !== nano.store || decision.model !== nano.model,
       parseFallback: false,
     };
   } catch {

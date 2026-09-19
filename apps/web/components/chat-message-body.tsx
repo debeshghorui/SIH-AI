@@ -26,6 +26,7 @@ export function ChatMessageBody({
               key={`code-${index}`}
               code={segment.code}
               language={segment.language}
+              filename={segment.filename}
               closed={segment.closed}
             />
           );

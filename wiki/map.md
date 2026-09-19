@@ -8,13 +8,13 @@ apps/api/src/router/       store + model + tools + reason + store guard
 apps/api/src/retrieve/     SQL, sqlite-vec, FTS5, vault file index
 apps/api/src/agent/        ReAct loop, inspect, SSE (`step`/`route`/`token`/`done`)
 apps/api/src/chat/         conversation CRUD + persist on chat `done`
-apps/api/src/tools/        fs, sandbox (dockerode), tesseract/pdfjs, docx
+apps/api/src/tools/        fs, project vault, sandbox (dockerode), tesseract/pdfjs, docx
 apps/api/src/airgap/       fetch patch, event log
 apps/api/src/models/       models.yaml loader + zod
 apps/web/app/              Next.js App Router pages
 apps/web/components/ui/    shadcn/ui
 apps/web/lib/query/        TanStack Query hooks to Express
-apps/web/components/       workbench: chat, trace, meter, artifacts, sidebar
+apps/web/components/       workbench: chat, studio, trace, meter, artifacts, sidebar
 apps/web/lib/highlight.ts  offline chromatic tokens for code fences
 data/vault/                uploaded and generated files
 data/kb/                   SOP markdown
@@ -30,6 +30,8 @@ When you add a **new folder or top-level file**, append one line under **Created
 
 ## Created
 
+- 2026-09-19 — `apps/web/components/studio-editor.tsx`
+- 2026-09-19 — `apps/api/src/tools/project.ts`; `apps/api/src/agent/code-files.ts`; `apps/web/components/studio.tsx`
 - 2026-09-19 — `apps/api/src/agent/attachment.ts`
 - 2026-09-19 — `apps/api/src/retrieve/vault-index.ts`; `apps/api/src/tools/ocr/text.ts`
 - 2026-09-19 — `apps/api/src/query/translate.test.ts`; `apps/web/lib/model-labels.ts`

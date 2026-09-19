@@ -111,6 +111,55 @@ export async function runSandbox(input: {
   };
 }
 
+export async function runProjectSandbox(input: {
+  conversationId: string;
+  mode?: "preview" | "run";
+  signal?: AbortSignal;
+}): Promise<SandboxResponse> {
+  const res = await fetch("/api/sandbox", {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify({
+      conversationId: input.conversationId,
+      mode: input.mode,
+    }),
+    signal: input.signal,
+  });
+
+  let data: unknown = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+
+  if (data && typeof data === "object" && "kind" in data) {
+    return data as SandboxResponse;
+  }
+
+  const message =
+    data && typeof data === "object" && "error" in data
+      ? String((data as { error: unknown }).error)
+      : `HTTP ${res.status}`;
+  return {
+    kind: "run",
+    ok: false,
+    stdout: "",
+    stderr: message,
+    exitCode: -1,
+    timedOut: false,
+    aborted: false,
+    image: "",
+    limits: {
+      image: "",
+      network: "none",
+      cpu: "50%",
+      mem: "256MB",
+      timeout: "20s",
+    },
+  };
+}
+
 export async function stopPreview(id: string): Promise<{ ok: boolean }> {
   return apiDelete<{ ok: boolean }>(`/api/sandbox/preview/${encodeURIComponent(id)}`);
 }

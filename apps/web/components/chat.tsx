@@ -30,6 +30,7 @@ import {
   type ChatMessage,
 } from "@/lib/query/chat";
 import { attachmentChipName, stripAttachmentChip, wantsInspectionBeat } from "@/lib/attachment-intent";
+import { looksLikeCodeRequest, wantsProjectStudio } from "@/lib/coding-intent";
 import { uploadToVault, streamInspect } from "@/lib/query/inspect";
 import { publishTrace, resetTrace } from "@/lib/query/trace-bus";
 import { getConversation } from "@/lib/query/conversations";
@@ -54,9 +55,11 @@ const SUGGESTIONS = [
 export function Chat({
   conversationId = null,
   onConversationBound,
+  onCodingPrompt,
 }: {
   conversationId?: string | null;
   onConversationBound?: (id: string) => void;
+  onCodingPrompt?: () => void;
 } = {}) {
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
@@ -134,6 +137,20 @@ export function Chat({
     const text = draft.trim();
     if (!text || busy) return;
 
+    if (
+      wantsProjectStudio(
+        text,
+        preferModel === "auto" ? undefined : preferModel,
+        {
+          priorCoding: messages.some(
+            (m) => m.role === "user" && looksLikeCodeRequest(m.content),
+          ),
+        },
+      )
+    ) {
+      onCodingPrompt?.();
+    }
+
     const userMsg: DisplayMessage = {
       id: crypto.randomUUID(),
       role: "user",
@@ -166,6 +183,13 @@ export function Chat({
       ) {
         publishTrace(event);
       }
+      if (
+        event.type === "step" &&
+        event.data?.tool === "fs" &&
+        event.title === "Save project files"
+      ) {
+        onCodingPrompt?.();
+      }
       if (event.type === "token") {
         setMessages((current) =>
           current.map((m) =>
@@ -197,6 +221,8 @@ export function Chat({
           onConversationBound?.(event.conversationId);
         }
         void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["project"] });
+        void queryClient.invalidateQueries({ queryKey: ["project-file"] });
       }
     };
 

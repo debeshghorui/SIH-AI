@@ -8,7 +8,7 @@ Rehearse until boring. Eight minutes. Airplane mode.
 | 0:40 | SOP question for tag 12-P-104 | Router → chat + vector. Top-5 citations |
 | 1:40 | Upload `inspection_scan.png` | Router → vision/OCR. Findings table |
 | 3:00 | Agent writes the note | Trace steps. Download `approval_note.docx` |
-| 5:00 | Parse tank CSV in JS, write tests, run | Router → coder. Sandbox red then green |
+| 5:00 | Parse tank CSV in JS, write tests, **Run** in Project studio | Router → coder. Files appear. Sandbox red then green |
 | 6:40 | Network log | Only `127.0.0.1` |
 | 7:20 | Open `models.yaml` | New model = a row, not a rewrite |
 

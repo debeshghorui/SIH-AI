@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
+import http from "node:http";
+import type { ServerResponse } from "node:http";
 import Docker from "dockerode";
 import { z } from "zod";
+import { planProjectRun, projectDir } from "../project";
 
 /**
  * Sandbox tool. One fresh container per run, never reused.
@@ -9,8 +12,12 @@ import { z } from "zod";
  *   Python → python:3.12-alpine --network=none
  *   HTML/CSS → nginx:alpine, port 80 bound to 127.0.0.1 only
  *              (preview needs a loopback bind; --network=none cannot publish ports)
+ *              Browser iframe hits GET /sandbox/preview/:id via Next `/api`.
  *
  * Exec containers: CPU/mem caps, CapDrop ALL, 20s timeout, AutoRemove.
+ * nginx still CapDrop ALL but CapAdd CHOWN/SETUID/SETGID/NET_BIND_SERVICE
+ * (alpine nginx chowns cache dirs and binds :80). Preview skips the image
+ * entrypoint so `apk` cannot hang on loopback DNS.
  * Shutdown is SIGTERM with 2s grace, then SIGKILL. Client abort takes the
  * same path. `shutdownSandbox()` stops leftover labelled containers.
  */
@@ -28,6 +35,8 @@ export const SANDBOX_TIMEOUT_MS = 20_000;
 export const PREVIEW_TTL_MS = 5 * 60 * 1000;
 const STOP_GRACE_SEC = 2;
 const SANDBOX_LABEL = "sih.sandbox";
+/** nginx:alpine needs these after CapDrop ALL or it exits on chown(client_temp). */
+const NGINX_CAPS = ["CHOWN", "SETUID", "SETGID", "NET_BIND_SERVICE"];
 
 export const SANDBOX_LANGS = [
   "js",
@@ -55,6 +64,13 @@ export const sandboxInputSchema = z.object({
 });
 
 export type SandboxInput = z.input<typeof sandboxInputSchema>;
+
+export const sandboxProjectSchema = z.object({
+  conversationId: z.string().uuid(),
+  mode: z.enum(["preview", "run"]).optional(),
+});
+
+export type SandboxProjectInput = z.infer<typeof sandboxProjectSchema>;
 
 export interface SandboxLimits {
   image: string;
@@ -134,6 +150,91 @@ function limitsFor(image: string, network: string, timeout: string): SandboxLimi
     mem: "256MB",
     timeout,
   };
+}
+
+function nginxHostConfig(extra: Docker.HostConfig = {}): Docker.HostConfig {
+  return {
+    NetworkMode: "bridge",
+    CpuQuota: CPU_QUOTA,
+    CpuPeriod: CPU_PERIOD,
+    Memory: MEM_LIMIT,
+    MemorySwap: MEM_LIMIT,
+    AutoRemove: false,
+    CapDrop: ["ALL"],
+    CapAdd: NGINX_CAPS,
+    SecurityOpt: ["no-new-privileges:true"],
+    PidsLimit: 32,
+    Dns: ["127.0.0.1"],
+    PortBindings: {
+      "80/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+    },
+    ...extra,
+  };
+}
+
+function previewPublicUrl(id: string): string {
+  return `/api/sandbox/preview/${id}/index.html`;
+}
+
+export function sanitizePreviewPath(raw: string | string[] | undefined): string {
+  const joined = Array.isArray(raw) ? raw.join("/") : (raw ?? "");
+  const cleaned = joined.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!cleaned) return "/";
+  const parts = cleaned.split("/").filter((p) => p.length > 0);
+  if (parts.some((p) => p === ".." || p.includes("\0"))) {
+    throw new Error("preview: bad path");
+  }
+  return `/${parts.join("/")}`;
+}
+
+export function getLivePreviewPort(id: string): number | undefined {
+  return previewsById.get(id)?.port;
+}
+
+/**
+ * Stream nginx loopback bytes to the browser. Same-origin iframe via Next `/api`.
+ */
+export function proxyPreview(
+  id: string,
+  subpath: string,
+  res: ServerResponse,
+): void {
+  const record = previewsById.get(id);
+  if (!record) {
+    res.statusCode = 404;
+    res.setHeader("content-type", "text/plain; charset=utf-8");
+    res.end("preview gone");
+    return;
+  }
+  let path: string;
+  try {
+    path = sanitizePreviewPath(subpath);
+  } catch {
+    res.statusCode = 400;
+    res.setHeader("content-type", "text/plain; charset=utf-8");
+    res.end("bad path");
+    return;
+  }
+  const req = http.get(
+    { hostname: "127.0.0.1", port: record.port, path, timeout: 8_000 },
+    (up) => {
+      res.statusCode = up.statusCode ?? 502;
+      const type = up.headers["content-type"];
+      if (type) res.setHeader("content-type", type);
+      const cache = up.headers["cache-control"];
+      if (cache) res.setHeader("cache-control", cache);
+      up.pipe(res);
+    },
+  );
+  req.on("error", () => {
+    if (!res.headersSent) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "text/plain; charset=utf-8");
+      res.end("preview unreachable");
+    } else {
+      res.end();
+    }
+  });
 }
 
 function failRun(
@@ -412,6 +513,212 @@ export async function runSandbox(
   }
 }
 
+export type ProjectSandboxResult = SandboxResult | PreviewResult;
+
+/**
+ * Run or preview the conversation project directory (bind-mount, read-only).
+ */
+export async function runProject(
+  input: SandboxProjectInput,
+  signal?: AbortSignal,
+): Promise<ProjectSandboxResult> {
+  const parsed = sandboxProjectSchema.parse(input);
+  let plan;
+  try {
+    plan = planProjectRun(parsed.conversationId, parsed.mode);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (parsed.mode === "preview") return failPreview(message);
+    return failRun(NODE_IMAGE, message);
+  }
+
+  if (plan.mode === "preview") {
+    return previewProjectDir(parsed.conversationId);
+  }
+
+  const image = execImage(plan.lang);
+  if (signal?.aborted) {
+    return failRun(image, "aborted before start", { aborted: true, exitCode: 137 });
+  }
+  try {
+    await client().ping();
+  } catch (err) {
+    return failRun(image, `Docker daemon unreachable: ${String(err)}`);
+  }
+  if (!(await imagePresent(image))) {
+    return failRun(image, `image ${image} not found. Run bun run sandbox:prepull`);
+  }
+
+  const hostDir = projectDir(parsed.conversationId);
+  const name = `sih-sbx-${shortId()}`;
+  let container: Docker.Container | null = null;
+  const timeoutSignal = AbortSignal.timeout(SANDBOX_TIMEOUT_MS);
+  const combined = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal;
+
+  try {
+    container = await client().createContainer({
+      Image: image,
+      name,
+      Entrypoint: ["/bin/sh", "-c"],
+      Cmd: [plan.cmd],
+      WorkingDir: "/work",
+      Env: ["NODE_NO_WARNINGS=1"],
+      Labels: { [SANDBOX_LABEL]: "1" },
+      OpenStdin: false,
+      Tty: false,
+      HostConfig: {
+        Binds: [`${hostDir}:/work:ro`],
+        NetworkMode: "none",
+        CpuQuota: CPU_QUOTA,
+        CpuPeriod: CPU_PERIOD,
+        Memory: MEM_LIMIT,
+        MemorySwap: MEM_LIMIT,
+        AutoRemove: false,
+        CapDrop: ["ALL"],
+        SecurityOpt: ["no-new-privileges:true"],
+        PidsLimit: 64,
+      },
+    });
+    live.add(container);
+
+    const abortNow = () => {
+      if (container) void gracefulStop(container);
+    };
+    if (combined.aborted) abortNow();
+    else combined.addEventListener("abort", abortNow, { once: true });
+
+    await container.start();
+
+    const abortDone = new Promise<"abort">((resolve) => {
+      if (combined.aborted) {
+        resolve("abort");
+        return;
+      }
+      combined.addEventListener("abort", () => resolve("abort"), { once: true });
+    });
+
+    const waitDone = container
+      .wait()
+      .then((result) => ({ type: "exit" as const, code: Number(result?.StatusCode ?? -1) }))
+      .catch(() => ({ type: "exit" as const, code: -1 }));
+
+    const outcome = await Promise.race([
+      waitDone,
+      abortDone.then(() => ({ type: "abort" as const })),
+    ]);
+
+    const logs = await readLogs(container);
+
+    if (outcome.type === "abort") {
+      await gracefulStop(container);
+      const timedOut = timeoutSignal.aborted && !signal?.aborted;
+      return {
+        kind: "run",
+        ok: false,
+        stdout: logs.stdout,
+        stderr: logs.stderr,
+        exitCode: 137,
+        timedOut,
+        aborted: !timedOut,
+        image,
+        limits: limitsFor(image, "none", "20s"),
+      };
+    }
+
+    return {
+      kind: "run",
+      ok: outcome.code === 0,
+      stdout: logs.stdout,
+      stderr: logs.stderr,
+      exitCode: outcome.code,
+      timedOut: false,
+      aborted: false,
+      image,
+      limits: limitsFor(image, "none", "20s"),
+    };
+  } catch (err) {
+    return failRun(image, err instanceof Error ? err.message : String(err));
+  } finally {
+    if (container) {
+      live.delete(container);
+      await forceRemove(container);
+    }
+  }
+}
+
+async function previewProjectDir(conversationId: string): Promise<PreviewResult> {
+  try {
+    await client().ping();
+  } catch (err) {
+    return failPreview(`Docker daemon unreachable: ${String(err)}`);
+  }
+  if (!(await imagePresent(NGINX_IMAGE))) {
+    return failPreview(`image ${NGINX_IMAGE} not found. Run bun run sandbox:prepull`);
+  }
+
+  const sessionId = conversationId;
+  const existingId = previewIdBySession.get(sessionId);
+  if (existingId) await stopPreview(existingId);
+
+  const hostDir = projectDir(conversationId);
+  const id = shortId();
+  const name = `sih-prev-${id}`;
+  let container: Docker.Container | null = null;
+
+  try {
+    container = await client().createContainer({
+      Image: NGINX_IMAGE,
+      name,
+      Labels: { [SANDBOX_LABEL]: "preview" },
+      // Skip image entrypoint: it runs `apk` and hangs when DNS is 127.0.0.1.
+      Entrypoint: ["nginx"],
+      Cmd: ["-g", "daemon off;"],
+      ExposedPorts: { "80/tcp": {} },
+      HostConfig: nginxHostConfig({
+        Binds: [`${hostDir}:/usr/share/nginx/html:ro`],
+      }),
+    });
+    live.add(container);
+    await container.start();
+    const port = await waitUntilPreviewServing(container);
+    const expiresAt = Date.now() + PREVIEW_TTL_MS;
+    const timer = setTimeout(() => {
+      void stopPreview(id);
+    }, PREVIEW_TTL_MS);
+
+    const record: PreviewRecord = {
+      id,
+      sessionId,
+      container,
+      timer,
+      expiresAt,
+      port,
+    };
+    previewsById.set(id, record);
+    previewIdBySession.set(sessionId, id);
+
+    return {
+      kind: "preview",
+      ok: true,
+      previewUrl: previewPublicUrl(id),
+      previewId: id,
+      expiresAt: new Date(expiresAt).toISOString(),
+      stderr: "",
+      image: NGINX_IMAGE,
+      limits: limitsFor(NGINX_IMAGE, "loopback", "ttl 5m"),
+    };
+  } catch (err) {
+    if (container) {
+      live.delete(container);
+      await gracefulStop(container);
+      await forceRemove(container);
+    }
+    return failPreview(err instanceof Error ? err.message : String(err));
+  }
+}
+
 function wrapCss(css: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -447,23 +754,52 @@ ${code}
 </html>`;
 }
 
-async function waitForHostPort(
+async function waitUntilPreviewServing(
   container: Docker.Container,
   timeoutMs = 8_000,
 ): Promise<number> {
   const start = Date.now();
+  let port = 0;
   while (Date.now() - start < timeoutMs) {
+    let info: Docker.ContainerInspectInfo;
     try {
-      const info = await container.inspect();
-      const binding = info.NetworkSettings?.Ports?.["80/tcp"];
-      const hostPort = binding?.[0]?.HostPort;
-      if (hostPort) return Number(hostPort);
+      info = await container.inspect();
     } catch {
-      // still starting
+      throw new Error("preview container gone");
+    }
+    if (info.State?.Running === false) {
+      const logs = await readLogs(container);
+      const msg =
+        (logs.stderr || logs.stdout).trim() ||
+        `nginx exited ${info.State.ExitCode ?? -1}`;
+      throw new Error(msg);
+    }
+    const binding = info.NetworkSettings?.Ports?.["80/tcp"];
+    const hostPort = binding?.[0]?.HostPort;
+    if (hostPort) {
+      port = Number(hostPort);
+      if (await previewHttpOk(port)) return port;
     }
     await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error("preview port not bound");
+  throw new Error(port ? "preview not serving" : "preview port not bound");
+}
+
+function previewHttpOk(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const req = http.get(
+      { hostname: "127.0.0.1", port, path: "/", timeout: 400 },
+      (res) => {
+        res.resume();
+        resolve((res.statusCode ?? 500) < 500);
+      },
+    );
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
 }
 
 function failPreview(stderr: string): PreviewResult {
@@ -519,25 +855,12 @@ export async function runHtmlPreview(input: {
         `printf '%s' '${Buffer.from(html, "utf8").toString("base64")}' | base64 -d > /usr/share/nginx/html/index.html && exec nginx -g 'daemon off;'`,
       ],
       ExposedPorts: { "80/tcp": {} },
-      HostConfig: {
-        NetworkMode: "bridge",
-        CpuQuota: CPU_QUOTA,
-        CpuPeriod: CPU_PERIOD,
-        Memory: MEM_LIMIT,
-        MemorySwap: MEM_LIMIT,
-        AutoRemove: false,
-        SecurityOpt: ["no-new-privileges:true"],
-        PidsLimit: 32,
-        Dns: ["127.0.0.1"],
-        PortBindings: {
-          "80/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
-        },
-      },
+      HostConfig: nginxHostConfig(),
     });
     live.add(container);
 
     await container.start();
-    const port = await waitForHostPort(container);
+    const port = await waitUntilPreviewServing(container);
     const expiresAt = Date.now() + PREVIEW_TTL_MS;
     const timer = setTimeout(() => {
       void stopPreview(id);
@@ -557,7 +880,7 @@ export async function runHtmlPreview(input: {
     return {
       kind: "preview",
       ok: true,
-      previewUrl: `http://127.0.0.1:${port}/`,
+      previewUrl: previewPublicUrl(id),
       previewId: id,
       expiresAt: new Date(expiresAt).toISOString(),
       stderr: "",

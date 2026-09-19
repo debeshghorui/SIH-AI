@@ -127,7 +127,7 @@ function PreviewFrame({
         title="Sandbox HTML preview"
         src={result.previewUrl}
         sandbox="allow-scripts"
-        className="h-72 w-full rounded-lg border border-border bg-white"
+        className="block h-[min(24rem,45vh)] w-full rounded-lg border border-border bg-white"
       />
     </div>
   );

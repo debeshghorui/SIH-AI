@@ -1,5 +1,6 @@
 import { asc, desc, eq } from "drizzle-orm";
 import { openDb, schema } from "../retrieve/db";
+import { deleteProject } from "../tools/project";
 
 export const DEFAULT_TITLE = "New chat";
 export const TITLE_MAX = 80;
@@ -211,4 +212,9 @@ export function deleteConversation(id: string): void {
     .get();
   if (!existing) throw new ConversationNotFoundError(id);
   db.delete(schema.conversations).where(eq(schema.conversations.id, id)).run();
+  try {
+    deleteProject(id);
+  } catch {
+    // no project folder is fine
+  }
 }

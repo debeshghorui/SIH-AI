@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  FolderCode,
   PanelLeft,
   PanelLeftClose,
   PanelRight,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import { Chat } from "@/components/chat";
 import { Meter } from "@/components/meter";
+import { Studio } from "@/components/studio";
 import { Trace } from "@/components/trace";
 import {
   WorkbenchSidebar,
@@ -17,6 +19,7 @@ import {
 } from "@/components/workbench-sidebar";
 import { Button } from "@/components/ui/button";
 import { createConversation } from "@/lib/query/conversations";
+import { useProjectTree } from "@/lib/query/project";
 
 const COLLAPSED_KEY = "workbench.sidebar.collapsed";
 const TRACE_KEY = "workbench.trace.collapsed";
@@ -30,6 +33,11 @@ export function Workbench() {
   const [view, setView] = useState<SidebarView>("chat");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [virgin, setVirgin] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"chat" | "studio">("chat");
+  const [studioOpen, setStudioOpen] = useState(false);
+  const userHidStudio = useRef(false);
+  const prevConversationId = useRef<string | null>(null);
+  const { data: projectFiles } = useProjectTree(conversationId);
 
   useEffect(() => {
     if (window.localStorage.getItem(COLLAPSED_KEY) === "1") {
@@ -70,6 +78,35 @@ export function Workbench() {
       return next;
     });
   }
+
+  function openStudio() {
+    userHidStudio.current = false;
+    setStudioOpen(true);
+  }
+
+  function toggleStudio() {
+    setStudioOpen((open) => {
+      const next = !open;
+      userHidStudio.current = open;
+      return next;
+    });
+    setMobilePane((pane) => (studioOpen ? "chat" : pane));
+  }
+
+  useEffect(() => {
+    const prev = prevConversationId.current;
+    prevConversationId.current = conversationId;
+    if (prev && prev !== conversationId) {
+      userHidStudio.current = false;
+      setStudioOpen(false);
+      setMobilePane("chat");
+    }
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (userHidStudio.current) return;
+    if (projectFiles && projectFiles.length > 0) setStudioOpen(true);
+  }, [projectFiles]);
 
   const newChat = useMutation({
     mutationFn: createConversation,
@@ -143,6 +180,19 @@ export function Workbench() {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <button
+            type="button"
+            className={
+              studioOpen
+                ? "inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-muted px-2.5 text-[0.8rem] font-medium text-foreground"
+                : "inline-flex h-7 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[0.8rem] font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            }
+            aria-pressed={studioOpen}
+            onClick={toggleStudio}
+          >
+            <FolderCode className="size-3.5" />
+            Project
+          </button>
           <Button
             type="button"
             variant="ghost"
@@ -193,23 +243,69 @@ export function Workbench() {
         </div>
         <main
           className={
-            traceCollapsed
-              ? "grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-2 sm:gap-4 sm:p-4"
-              : "grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-2 sm:gap-4 sm:p-4 md:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.9fr)] lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.95fr)] xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,1fr)]"
+            studioOpen
+              ? traceCollapsed
+                ? "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden p-2 sm:gap-4 sm:p-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(18rem,1.05fr)]"
+                : "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden p-2 sm:gap-4 sm:p-4 md:grid md:grid-cols-[minmax(0,1fr)_minmax(18rem,1.05fr)] md:grid-rows-[minmax(0,1fr)_minmax(12rem,0.35fr)] xl:grid-cols-[minmax(0,0.95fr)_minmax(20rem,1.1fr)_minmax(16rem,0.8fr)] xl:grid-rows-none"
+              : traceCollapsed
+                ? "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden p-2 sm:gap-4 sm:p-4"
+                : "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden p-2 sm:gap-4 sm:p-4 md:grid md:grid-cols-[minmax(0,1.4fr)_minmax(16rem,0.9fr)] lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.95fr)] xl:grid-cols-[minmax(0,1.5fr)_minmax(20rem,1fr)]"
           }
         >
-          <Chat
-            conversationId={conversationId}
-            onConversationBound={(id) => {
-              setConversationId(id);
-              setVirgin(false);
-            }}
-          />
+          {studioOpen ? (
+            <div className="flex shrink-0 gap-1 md:hidden">
+              <Button
+                type="button"
+                variant={mobilePane === "chat" ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setMobilePane("chat")}
+              >
+                Chat
+              </Button>
+              <Button
+                type="button"
+                variant={mobilePane === "studio" ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => setMobilePane("studio")}
+              >
+                Project
+              </Button>
+            </div>
+          ) : null}
+          <div
+            className={
+              !studioOpen || mobilePane === "chat"
+                ? "flex min-h-0 min-w-0 flex-1 flex-col md:min-h-0"
+                : "hidden min-h-0 md:flex md:flex-col"
+            }
+          >
+            <Chat
+              conversationId={conversationId}
+              onConversationBound={(id) => {
+                setConversationId(id);
+                setVirgin(false);
+              }}
+              onCodingPrompt={openStudio}
+            />
+          </div>
+          {studioOpen ? (
+            <div
+              className={
+                mobilePane === "studio"
+                  ? "flex min-h-0 min-w-0 flex-1 flex-col md:min-h-0"
+                  : "hidden min-h-0 md:flex md:flex-col"
+              }
+            >
+              <Studio conversationId={conversationId} />
+            </div>
+          ) : null}
           <aside
             className={
               traceCollapsed
                 ? "hidden"
-                : "flex min-h-0 flex-col overflow-hidden max-md:min-h-[14rem]"
+                : studioOpen
+                  ? "flex min-h-0 flex-col overflow-hidden max-md:hidden md:col-span-2 xl:col-span-1 xl:col-start-3 xl:row-start-1"
+                  : "flex min-h-0 flex-col overflow-hidden max-md:min-h-[14rem]"
             }
           >
             <Trace onCollapse={toggleTrace} />

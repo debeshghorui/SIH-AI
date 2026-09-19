@@ -20,15 +20,25 @@ import {
   TITLE_MAX,
 } from "./chat/sessions";
 import { vaultList, resolveVaultPath, vaultWrite, vaultDelete } from "./tools/fs";
+import {
+  deleteProjectFile,
+  listTree,
+  ProjectError,
+  readProjectFile,
+  writeProjectFile,
+} from "./tools/project";
 import { removeVaultIndex } from "./retrieve/vault-index";
 import {
   isPreviewLanguage,
   normalizeLanguage,
+  proxyPreview,
   reapOrphanSandboxes,
   runHtmlPreview,
+  runProject,
   runSandbox,
   sandboxHealth,
   sandboxInputSchema,
+  sandboxProjectSchema,
   shutdownSandbox,
   stopPreview,
   UnsupportedLanguageError,
@@ -213,8 +223,76 @@ export function createApp() {
     }
   });
 
+  app.get("/projects/:id", (req, res) => {
+    try {
+      res.json({ items: listTree(req.params.id) });
+    } catch (err) {
+      const status = err instanceof ProjectError ? 400 : 500;
+      res.status(status).json({
+        error: "project-list-failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.get("/projects/:id/files/{*path}", (req, res) => {
+    try {
+      const rel = artifactParam(req.params.path);
+      const content = readProjectFile(req.params.id, rel);
+      res.json({ path: rel, content });
+    } catch (err) {
+      const status = err instanceof ProjectError ? 400 : 500;
+      res.status(status).json({
+        error: "project-read-failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  const projectWriteSchema = z.object({ content: z.string() });
+  app.put("/projects/:id/files/{*path}", (req, res) => {
+    const parsed = projectWriteSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "bad-request", issues: parsed.error.issues });
+      return;
+    }
+    try {
+      const rel = artifactParam(req.params.path);
+      const path = writeProjectFile(req.params.id, rel, parsed.data.content);
+      res.json({ ok: true, path });
+    } catch (err) {
+      const status = err instanceof ProjectError ? 400 : 500;
+      res.status(status).json({
+        error: "project-write-failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  app.delete("/projects/:id/files/{*path}", (req, res) => {
+    try {
+      const rel = artifactParam(req.params.path);
+      deleteProjectFile(req.params.id, rel);
+      res.json({ ok: true, path: rel });
+    } catch (err) {
+      const status = err instanceof ProjectError ? 400 : 500;
+      res.status(status).json({
+        error: "project-delete-failed",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.get("/sandbox/health", async (_req, res) => {
     res.json(await sandboxHealth());
+  });
+
+  app.get("/sandbox/preview/:id/{*path}", (req, res) => {
+    proxyPreview(req.params.id, artifactParam(req.params.path), res);
+  });
+
+  app.get("/sandbox/preview/:id", (req, res) => {
+    proxyPreview(req.params.id, "", res);
   });
 
   app.delete("/sandbox/preview/:id", async (req, res) => {
@@ -229,7 +307,38 @@ export function createApp() {
 
   // One fresh container per run. JS/TS/Python: --network=none.
   // HTML/CSS: nginx bound to 127.0.0.1. Client abort → SIGTERM then SIGKILL.
+  // Project body: { conversationId, mode } bind-mounts the chat project dir.
   app.post("/sandbox", async (req, res) => {
+    const hasCode =
+      typeof (req.body as { code?: unknown } | undefined)?.code === "string" &&
+      Boolean((req.body as { code: string }).code);
+    const projectParsed = sandboxProjectSchema.safeParse(req.body);
+    if (projectParsed.success && !hasCode) {
+      const controller = new AbortController();
+      const onClose = () => {
+        if (!res.writableEnded) controller.abort();
+      };
+      res.on("close", onClose);
+      try {
+        const result = await runProject(projectParsed.data, controller.signal);
+        res.json(result);
+      } catch (err) {
+        log.error({ err }, "sandbox project failed");
+        res.status(500).json({
+          kind: "run",
+          ok: false,
+          stdout: "",
+          stderr: err instanceof Error ? err.message : String(err),
+          exitCode: -1,
+          timedOut: false,
+          aborted: false,
+        });
+      } finally {
+        res.off("close", onClose);
+      }
+      return;
+    }
+
     const parsed = sandboxInputSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: "bad-request", issues: parsed.error.issues });
@@ -339,6 +448,7 @@ export function createApp() {
         hasAttachment: parsed.data.hasAttachment,
         attachmentName: parsed.data.attachmentName,
         preferModel: parsed.data.preferModel,
+        conversationId: parsed.data.conversationId,
       }),
       {
         conversationId: parsed.data.conversationId,

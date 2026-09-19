@@ -15,6 +15,13 @@ import {
 import { extractFindings } from "../tools/ocr";
 import { indexVaultText, readVaultExtract } from "../retrieve/vault-index";
 import { resolveStickyAttachment, isThinExtract, wantsVerbatimExtract } from "./attachment";
+import {
+  codingSystemPrompt,
+  conversationHasProject,
+  existingProjectPrompt,
+  isCodingTurn,
+  looksLikeCodeRequest,
+} from "./code-files";
 import type { AgentEvent } from "./events";
 
 const ATTACH_INLINE_CHARS = 18_000;
@@ -30,6 +37,8 @@ export interface RunAgentInput {
   attachmentName?: string;
   /** User preference for the generate step. Router still chooses store + tools. */
   preferModel?: PreferModel;
+  /** Chat thread that owns `data/vault/projects/<id>/`. */
+  conversationId?: string;
 }
 
 /**
@@ -56,7 +65,7 @@ export async function* runAgent(
 
   // 1. Translate
   let translatedFailed = false;
-  let translated;
+  let translated: Awaited<ReturnType<typeof translateQuery>>;
   try {
     translated = await translateQuery(query);
   } catch {
@@ -93,19 +102,31 @@ export async function* runAgent(
   };
 
   // 2. Route
+  const userTurns = input.messages.filter((m) => m.role === "user");
+  const priorCoding = userTurns
+    .slice(0, -1)
+    .some((m) => looksLikeCodeRequest(m.content));
+  const hasProject = conversationHasProject(input.conversationId);
+  const codingQuery = isCodingTurn(query, input.preferModel, undefined, {
+    priorCoding,
+    hasProject,
+  });
   const routed = await route(query, translated, {
     hasAttachment,
+    coding: codingQuery && !hasAttachment,
   });
   const decision = routed.decision;
   const routedAnswer = decision.model === "vision" ? "chat" : decision.model;
-  const answerId = input.preferModel ?? routedAnswer;
+  const answerId =
+    input.preferModel ??
+    (codingQuery && !hasAttachment ? "coder" : routedAnswer);
   const reason = input.preferModel
     ? `${decision.reason} (user preferred ${input.preferModel})`
     : decision.reason;
   yield {
     type: "route",
     store: decision.store,
-    model: input.preferModel ?? decision.model,
+    model: input.preferModel ?? (codingQuery && !hasAttachment ? "coder" : decision.model),
     tools: decision.tools,
     reason,
   };
@@ -115,12 +136,12 @@ export async function* runAgent(
       ? "Nano JSON parse failed; used the fallback decision."
       : null,
     routed.guarded
-      ? `Guard corrected store ${routed.nano.store} → ${decision.store} because the query references plant data.`
-      : "No store guard.",
+      ? `Guard corrected store ${routed.nano.store} → ${decision.store}, model ${routed.nano.model} → ${decision.model}.`
+      : "No router guard.",
     input.preferModel
       ? `User preferred generate model ${input.preferModel}; store and tools still from the router.`
       : null,
-    `Final: store=${decision.store} model=${input.preferModel ?? decision.model} tools=[${decision.tools.join(", ")}]. ${reason}`,
+    `Final: store=${decision.store} model=${answerId} tools=[${decision.tools.join(", ")}]. ${reason}`,
   ]
     .filter((line): line is string => Boolean(line))
     .join("\n");
@@ -130,7 +151,7 @@ export async function* runAgent(
     title: routed.parseFallback
       ? "Router (fallback)"
       : routed.guarded
-        ? "Router (store guarded)"
+        ? "Router (guarded)"
         : "Router",
     detail: routeLines,
     model: "nano",
@@ -210,7 +231,8 @@ export async function* runAgent(
   // 3. Retrieve. Attached files skip plant SOP stores; long extracts still
   // query the vault index for the passages that match the question.
   let citations: Citation[] = [];
-  const retrieveStore = attachmentName ? "files" : decision.store;
+  const skipPlant = !attachmentName && (codingQuery || decision.model === "coder");
+  const retrieveStore = attachmentName ? "files" : skipPlant ? "none" : decision.store;
   const shortAttach =
     Boolean(attachmentContext) &&
     attachmentContext.length <= ATTACH_INLINE_CHARS;
@@ -287,6 +309,12 @@ export async function* runAgent(
     .join("\n");
 
   const answerModel = getModel(answerId);
+  const coding =
+    !attachmentContext &&
+    isCodingTurn(query, input.preferModel, decision.model, {
+      priorCoding,
+      hasProject,
+    });
   yield {
     type: "step",
     stage: "generate",
@@ -301,11 +329,19 @@ export async function* runAgent(
     attachmentContext,
     citationsContext: context,
     verbatim: wantsVerbatimExtract(query),
+    coding,
+    projectFiles: coding ? existingProjectPrompt(input.conversationId) : "",
   });
 
   const genMessages: Message[] = [
     { role: "system", content: systemContent },
-    ...input.messages.filter((m) => m.role !== "system"),
+    ...input.messages.filter((m) => {
+      if (m.role === "system") return false;
+      // Prior refusals few-shot the coder into "I will not generate".
+      // Existing files live in the system snapshot, not in chat.
+      if (coding && m.role === "assistant") return false;
+      return true;
+    }),
   ];
 
   let stream: AsyncIterable<{ message: { content: string } }>;
@@ -352,6 +388,8 @@ function generateSystemPrompt(input: {
   attachmentContext: string;
   citationsContext: string;
   verbatim?: boolean;
+  coding?: boolean;
+  projectFiles?: string;
 }): string {
   const citeRule =
     "Cite sources only as (1), (2), ... matching the numbered context below. Never invent a source, filename, or citation number that is not in the context.";
@@ -374,6 +412,10 @@ function generateSystemPrompt(input: {
     ]
       .filter(Boolean)
       .join("\n\n");
+  }
+
+  if (input.coding) {
+    return codingSystemPrompt(input.projectFiles ?? "");
   }
 
   return (
