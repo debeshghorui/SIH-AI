@@ -11,6 +11,7 @@
     "sandbox:prepull": "bun scripts/prepull-sandbox.ts"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.9",
     "docx": "^9.7.1",
     "dockerode": "^5.0.1",
     "drizzle-orm": "^0.45.2",

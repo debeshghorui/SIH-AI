@@ -29,7 +29,7 @@ import {
   type AgentEvent,
   type ChatMessage,
 } from "@/lib/query/chat";
-import { wantsInspectionBeat } from "@/lib/attachment-intent";
+import { attachmentChipName, stripAttachmentChip, wantsInspectionBeat } from "@/lib/attachment-intent";
 import { uploadToVault, streamInspect } from "@/lib/query/inspect";
 import { publishTrace, resetTrace } from "@/lib/query/trace-bus";
 import { getConversation } from "@/lib/query/conversations";
@@ -350,14 +350,31 @@ export function Chat({
                 }
 
                 if (message.role === "user") {
+                  const visible = stripAttachmentChip(message.content);
+                  const fileName = attachmentChipName(message.content);
                   return (
                     <li key={message.id} className="flex justify-end">
                       <div
                         className="max-w-[min(100%,34rem)] rounded-2xl border border-border/40 bg-chat-user px-4 py-2.5 text-[0.9375rem] leading-7 text-chat-user-foreground"
                       >
-                        <p className="whitespace-pre-wrap break-words">
-                          {message.content}
-                        </p>
+                        <div className="flex flex-col gap-1.5">
+                          {visible ? (
+                            <p className="whitespace-pre-wrap break-words">
+                              {visible}
+                            </p>
+                          ) : null}
+                          {fileName ? (
+                            <div className="flex items-center gap-1.5 self-start rounded-md border border-border/40 bg-background/50 px-2 py-0.5">
+                              <Paperclip
+                                className="size-3 shrink-0 opacity-70"
+                                aria-hidden
+                              />
+                              <span className="max-w-52 truncate font-mono text-[0.7rem] opacity-90">
+                                {fileName}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     </li>
                   );

@@ -4,21 +4,51 @@ import { fileURLToPath } from "node:url";
 import { vaultRead, resolveVaultPath } from "../fs";
 import { ollama } from "../../models/client";
 import { getModel } from "../../models/registry";
+import {
+  hasUsableText,
+  preferReadableText,
+  textItemsToLines,
+  TEXT_LAYER_MIN,
+  type PdfTextItem,
+} from "./text";
 
 /**
- * OCR + vision tool. Two paths:
- *   - PDF/image text extraction via tesseract.js (offline, vendored
- *     eng.traineddata under vendor/).
- *   - P&ID / photo understanding via the `vision` model (qwen2.5vl:3b).
+ * OCR + vision tool.
+ *   - PDF: every page's text layer (with line breaks). Image-only pages are
+ *     rasterized via @napi-rs/canvas, then tesseract, then the vision model.
+ *   - Image: tesseract first; vision (`qwen2.5vl:3b`) if OCR is empty or thin.
  *
- * Both run on loopback only — tesseract is local WASM, the vision call goes
- * through the air-gap-wrapped fetch to Ollama.
+ * Tesseract is local WASM; vision goes through the air-gap-wrapped Ollama client.
  */
+
+export type ExtractPurpose = "document" | "inspection";
+
+export type ExtractResult = {
+  text: string;
+  vision: string;
+  pages: number;
+  methods: string[];
+};
+
+const MAX_PAGES = 40;
+const MAX_VISION_PAGES = 10;
+const RASTER_MAX_EDGE = 1280;
+const THIN_OCR_CHARS = 200;
+
+const DOCUMENT_PROMPT =
+  "OCR this page. Output every visible word, heading, and list item in reading order as markdown. Do not summarize. Do not omit numbered steps. If a line is unreadable write [illegible]. Do not invent text that is not visible.";
+
+const INSPECTION_PROMPT =
+  "This is a plant inspection scan or P&ID. List every finding, gauge reading, tag, and anomaly as a short bulleted list.";
 
 function vendorDir(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const root = path.resolve(here, "../../../../../");
   return path.join(root, "vendor");
+}
+
+function promptFor(purpose: ExtractPurpose): string {
+  return purpose === "inspection" ? INSPECTION_PROMPT : DOCUMENT_PROMPT;
 }
 
 async function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
@@ -33,13 +63,9 @@ async function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Pr
   }
 }
 
-async function extractWithTesseract(buf: Uint8Array, mime: string): Promise<string> {
-  // tesseract.js downloads its WASM core + traineddata from a CDN on first
-  // use. Under the air-gap that fetch is blocked (correct), and tesseract
-  // may hang retrying rather than rejecting. We wrap init in a hard timeout
-  // and fall through to the vision model on timeout/failure. At the venue,
-  // vendor/eng.traineddata + a local tesseract-core make this path work
-  // offline; until then the vision model carries OCR.
+async function extractWithTesseract(buf: Uint8Array, _mime: string): Promise<string> {
+  // tesseract.js may try a CDN for WASM on first use. Air-gap blocks that
+  // fetch; wrap init in a timeout and fall through to vision.
   const fallback = "";
   try {
     const { createWorker } = await import("tesseract.js");
@@ -52,9 +78,7 @@ async function extractWithTesseract(buf: Uint8Array, mime: string): Promise<stri
     if (!worker) return fallback;
     try {
       const { data } = await withTimeout(
-        worker.recognize(
-          { data: Buffer.from(buf), type: mime } as unknown as string,
-        ),
+        worker.recognize(Buffer.from(buf) as unknown as string),
         30_000,
         () => ({ data: { text: "" } }) as never,
       );
@@ -72,29 +96,111 @@ async function extractWithTesseract(buf: Uint8Array, mime: string): Promise<stri
   }
 }
 
+async function rasterizePage(page: {
+  getViewport: (opts: { scale: number }) => { width: number; height: number };
+  render: (opts: Record<string, unknown>) => { promise: Promise<unknown> };
+}): Promise<Buffer | null> {
+  try {
+    const { createCanvas } = await import("@napi-rs/canvas");
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(2, RASTER_MAX_EDGE / Math.max(base.width, base.height, 1));
+    const viewport = page.getViewport({ scale: Math.max(scale, 0.5) });
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({
+      canvasContext: ctx,
+      viewport,
+      canvas,
+    }).promise;
+    return canvas.toBuffer("image/png");
+  } catch (err) {
+    console.warn(
+      `pdf rasterize failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
 /**
- * Render the first page of a PDF to a PNG buffer using pdfjs-dist, then
- * run tesseract over it. Returns the extracted text.
+ * Extract every page of a PDF. Text-layer pages keep their layout; scanned
+ * pages go through tesseract then the vision model. Never sends raw PDF
+ * bytes to Ollama (vision only accepts images).
  */
-async function extractPdf(buf: Uint8Array): Promise<string> {
+export async function extractPdfBuffer(
+  buf: Uint8Array,
+  purpose: ExtractPurpose = "document",
+): Promise<ExtractResult> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-  // pdfjs needs a canvas-like interface; we use the node-canvas-free path
-  // by rendering to an offscreen canvas shim.
-  const data = new Uint8Array(buf);
-  const doc = await pdfjs.getDocument({ data, useSystemFonts: true }).promise;
-  const page = await doc.getPage(1);
-  const viewport = page.getViewport({ scale: 2 });
-  // Minimal canvas shim: collect operator list and render to a PNG via
-  // @napi-rs/canvas if available; otherwise fall back to text items only.
-  const textContent = await page.getTextContent();
-  const text = textContent.items
-    .map((it) => ("str" in it ? it.str : ""))
-    .join(" ")
-    .trim();
-  if (text.length > 0) return text;
-  // No embedded text — rasterize via tesseract on the rendered page.
-  // (Full raster path needs a canvas; for the demo we return the text layer.)
-  return text;
+  const data = Uint8Array.from(buf);
+  const doc = await pdfjs.getDocument({
+    data,
+    useSystemFonts: true,
+    disableFontFace: true,
+    isEvalSupported: false,
+    useWorkerFetch: false,
+    useWasm: false,
+    verbosity: 0,
+  }).promise;
+
+  const total = doc.numPages;
+  const n = Math.min(total, MAX_PAGES);
+  const parts: string[] = [];
+  const methods: string[] = [];
+  let visionPages = 0;
+
+  for (let i = 1; i <= n; i++) {
+    const page = await doc.getPage(i);
+    const textContent = await page.getTextContent();
+    let pageText = textItemsToLines(textContent.items as PdfTextItem[]);
+    let method = hasUsableText(pageText) ? "text" : "empty";
+
+    if (!hasUsableText(pageText)) {
+      const png = await rasterizePage(page);
+      if (png) {
+        const ocr = await extractWithTesseract(png, "image/png");
+        if (hasUsableText(ocr)) {
+          pageText = ocr;
+          method = "ocr";
+        } else if (visionPages < MAX_VISION_PAGES) {
+          try {
+            const caption = await describeImage(png, "image/png", promptFor(purpose));
+            pageText = caption || ocr || pageText;
+            method = caption ? "vision" : ocr ? "ocr" : method;
+            visionPages += 1;
+          } catch {
+            pageText = ocr || pageText;
+            method = ocr ? "ocr" : method;
+          }
+        } else {
+          pageText =
+            ocr ||
+            `[page ${i} skipped: scanned-page vision cap of ${MAX_VISION_PAGES}]`;
+          method = ocr ? "ocr" : "skipped";
+        }
+      }
+    }
+
+    if (method !== "empty") methods.push(method);
+    parts.push(`--- page ${i} ---\n${pageText}`.trim());
+    page.cleanup();
+  }
+
+  if (typeof doc.destroy === "function") {
+    await doc.destroy();
+  }
+
+  if (total > MAX_PAGES) {
+    parts.push(`[pages ${MAX_PAGES + 1}–${total} omitted: page cap]`);
+  }
+
+  return {
+    text: parts.join("\n\n").trim(),
+    vision: "",
+    pages: n,
+    methods: [...new Set(methods)],
+  };
 }
 
 /**
@@ -107,7 +213,6 @@ export async function describeImage(
   prompt: string,
 ): Promise<string> {
   const vision = getModel("vision");
-  // Ollama's `images` field expects raw base64, not a data URI.
   const base64 = Buffer.from(buf).toString("base64");
   const res = await ollama().chat({
     model: vision.ollama,
@@ -120,46 +225,56 @@ export async function describeImage(
       },
     ],
   });
+  void mime;
   return res.message.content.trim();
 }
 
 /**
- * Extract findings from a scanned inspection (PDF or image) in the vault.
- * Returns a structured findings string the agent can turn into a docx.
+ * Extract text from a vault PDF or image. Chat uses `purpose: "document"`
+ * (faithful transcription). The inspection beat uses `purpose: "inspection"`.
  */
 export async function extractFindings(
   vaultName: string,
-): Promise<{ text: string; vision: string }> {
+  opts: { purpose?: ExtractPurpose } = {},
+): Promise<ExtractResult> {
+  const purpose = opts.purpose ?? "document";
   const full = resolveVaultPath(vaultName);
   const buf = await readFile(full);
   const ext = path.extname(vaultName).toLowerCase();
-  let text = "";
+
   if (ext === ".pdf") {
-    text = await extractPdf(buf);
-  } else {
-    // Images: skip tesseract (its worker thread crashes Bun on bad input).
-    // The vision model (qwen2.5vl:3b) is the primary OCR path for the demo.
-    text = "";
-  }
-  // PDF text layer is enough — Ollama vision cannot ingest PDF bytes as an image.
-  if (ext === ".pdf" && text.length > 0) {
-    return { text, vision: "" };
+    return extractPdfBuffer(buf, purpose);
   }
 
-  // Vision pass for image scans / P&IDs.
+  const mime =
+    ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
+  const ocr = await extractWithTesseract(buf, mime);
+  const ocrOk = hasUsableText(ocr) && ocr.length >= THIN_OCR_CHARS;
   let vision = "";
-  try {
-    const mime =
-      ext === ".jpg" || ext === ".jpeg" ? "image/jpeg" : "image/png";
-    vision = await describeImage(
-      buf,
-      mime,
-      "This is a plant inspection scan or P&ID. List every finding, gauge reading, tag, and anomaly as a short bulleted list.",
-    );
-  } catch (err) {
-    vision = `vision unavailable: ${err instanceof Error ? err.message : String(err)}`;
+  if (purpose === "inspection" || !ocrOk) {
+    try {
+      vision = await describeImage(buf, mime, promptFor(purpose));
+    } catch (err) {
+      vision = `vision unavailable: ${err instanceof Error ? err.message : String(err)}`;
+    }
   }
-  return { text, vision };
+  const methods: string[] = [];
+  if (hasUsableText(ocr)) methods.push("ocr");
+  if (hasUsableText(vision) && !vision.startsWith("vision unavailable")) {
+    methods.push("vision");
+  }
+
+  if (purpose === "inspection") {
+    return { text: ocr, vision, pages: 1, methods };
+  }
+
+  return {
+    text: preferReadableText(ocr, vision),
+    vision: "",
+    pages: 1,
+    methods,
+  };
 }
 
-export { vaultRead };
+export { vaultRead, textItemsToLines, TEXT_LAYER_MIN };
+export type { PdfTextItem };

@@ -19,7 +19,14 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiDelete<T>(path: string): Promise<T> {
   const res = await fetch(path, { method: "DELETE", headers: { accept: "application/json" } });
   if (!res.ok) {
-    throw new ApiError(res.status, path);
+    let detail = path;
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body.message) detail = `${path}: ${body.message}`;
+    } catch {
+      // keep the path only
+    }
+    throw new ApiError(res.status, detail);
   }
   return res.json() as Promise<T>;
 }

@@ -17,7 +17,7 @@ If a package is not here, **do not add it** without updating this page and `memo
 | Vectors | sqlite-vec in `data/plant.sqlite` (loaded via `sqlite-vec` npm into bun:sqlite) | Pinecone, Weaviate, Chroma server |
 | Keyword | SQLite FTS5 | Algolia |
 | Embeddings | Ollama `nomic-embed-text` | OpenAI embeddings |
-| OCR | tesseract.js + pdfjs-dist (vendored traineddata) | Cloud Vision, Python RapidOCR |
+| OCR | tesseract.js + pdfjs-dist + `@napi-rs/canvas` (vendored traineddata; canvas rasterizes scanned PDF pages) | Cloud Vision, Python RapidOCR |
 | Office | `docx`, exceljs, pptxgenjs | python-docx |
 | Sandbox | dockerode `node:22-alpine` / `python:3.12-alpine` `--network=none`; HTML/CSS via `nginx:alpine` bound to `127.0.0.1`. One fresh container per run, SIGTERM then SIGKILL. | `eval()`, unrestricted `child_process`, isolated-vm |
 | Config | `models.yaml` + zod | Hard-coded model names |

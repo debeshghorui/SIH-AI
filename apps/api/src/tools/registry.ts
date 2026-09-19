@@ -65,7 +65,9 @@ export const tools: Record<string, Tool> = {
     input: z.object({ name: z.string() }),
     async run(raw) {
       const parsed = z.object({ name: z.string() }).parse(raw);
-      const { text, vision } = await extractFindings(parsed.name);
+      const { text, vision } = await extractFindings(parsed.name, {
+        purpose: "document",
+      });
       return `OCR text:\n${text.slice(0, 800)}\n\nVision findings:\n${vision.slice(0, 800)}`;
     },
   },

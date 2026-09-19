@@ -33,7 +33,7 @@ SSE: `step` (append-only timeline) + `route` (badges) + `token` / `done` / `erro
 
 Translate (per-task nano prompts, no few-shots, Jaccard drop of paraphrase sub-queries, plant-SOP / `setTimeout` leak guard) → route (+ `guardStore`) → retrieve unique rewrite/step-back/sub-queries (HyDE embedded on the vector path only; plant stores skipped when `store: none`) → rank top-5 → generate with numbered citations. If best vector score &lt; 6, FTS5 keyword fallback.
 
-Vault filename search (`retrieveFiles`) is still a stub.
+Vault files: upload writes `data/vault/`. PDF extract reads every page (text layer, else raster → tesseract → vision). Images run tesseract first, then vision if OCR is empty or a short caption. Extracted text is chunked into `vault_chunks` + sqlite-vec + FTS5. `retrieveFiles` searches that index plus filenames. An attached document is injected into generate and skips plant SOP stores. Follow-ups like “this pic” reuse the last `[attachment: name]` chip unless that extract is thin (then OCR runs again). “Give me the text” answers quote the extract verbatim. The composer does not show a sticky file bar; the user bubble shows a filename pill.
 
 ## Air-gap layers
 

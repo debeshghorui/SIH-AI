@@ -2,12 +2,17 @@ import { z } from "zod";
 import { eq, like, or } from "drizzle-orm";
 import { openDb, schema } from "./db";
 import { embed } from "./embed";
+import {
+  matchVaultFilenames,
+  retrieveVaultFts,
+  retrieveVaultVector,
+} from "./vault-index";
 
 /**
  * Retrieval. Three stores, one ranker:
  *   - sql:     tag / inspection lookups against `tags` + `inspections`
  *   - vector:  sqlite-vec cosine search over `kb_chunks_vec` (nomic-embed-text)
- *   - files:   filenames in `data/vault/` matched by keyword
+ *   - files:   vault_chunks (uploaded PDF/image text) + filename match
  *   - fts5:    keyword fallback when the best vector score < 6
  *
  * The ranker merges results into a top-5 list with a `score` and a `kind`
@@ -161,12 +166,9 @@ export function retrieveFts(query: string): Citation[] {
   }
 }
 
-/** Files store: list vault filenames matching keywords. */
+/** Files store: vault FTS + filename match. Vector is added in `retrieve`. */
 export function retrieveFiles(query: string): Citation[] {
-  // Delegated to tools/fs.ts in a later phase; stub returns empty so the
-  // router's `files` choice still flows through vector/fts for text.
-  void query;
-  return [];
+  return [...matchVaultFilenames(query), ...retrieveVaultFts(query)];
 }
 
 function mergeTop(all: Citation[]): Citation[] {
@@ -227,7 +229,7 @@ export async function retrieve(
   if (store === "sql") {
     for (const q of queries) all.push(...retrieveSql(q));
   }
-  if (store === "vector" || store === "files") {
+  if (store === "vector") {
     const vectorQueries = usedHyde ? [...queries, hyde] : queries;
     const vecLists = await Promise.all(vectorQueries.map((q) => retrieveVector(q)));
     const vec = vecLists.flat();
@@ -243,6 +245,20 @@ export async function retrieve(
     }
   }
   if (store === "files") {
+    const vectorQueries = usedHyde ? [...queries, hyde] : queries;
+    const vecLists = await Promise.all(
+      vectorQueries.map((q) => retrieveVaultVector(q)),
+    );
+    const vec = vecLists.flat();
+    all.push(...vec);
+    if (vec.length > 0) {
+      bestVectorScore = Math.max(...vec.map((v) => v.score));
+    } else {
+      bestVectorScore = 0;
+    }
+    if (vec.length === 0 || bestVectorScore < VECTOR_SCORE_FLOOR) {
+      usedFts = true;
+    }
     for (const q of queries) all.push(...retrieveFiles(q));
   }
 

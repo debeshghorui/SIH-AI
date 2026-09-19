@@ -5,7 +5,7 @@ Create files **only** on this map. If you need a new top-level folder, add it he
 ```
 apps/api/src/query/        rewrite, step-back, decompose, HyDE (+ translate.test.ts)
 apps/api/src/router/       store + model + tools + reason + store guard
-apps/api/src/retrieve/     SQL, sqlite-vec, FTS5 (files store still stub)
+apps/api/src/retrieve/     SQL, sqlite-vec, FTS5, vault file index
 apps/api/src/agent/        ReAct loop, inspect, SSE (`step`/`route`/`token`/`done`)
 apps/api/src/chat/         conversation CRUD + persist on chat `done`
 apps/api/src/tools/        fs, sandbox (dockerode), tesseract/pdfjs, docx
@@ -30,5 +30,7 @@ When you add a **new folder or top-level file**, append one line under **Created
 
 ## Created
 
+- 2026-09-19 — `apps/api/src/agent/attachment.ts`
+- 2026-09-19 — `apps/api/src/retrieve/vault-index.ts`; `apps/api/src/tools/ocr/text.ts`
 - 2026-09-19 — `apps/api/src/query/translate.test.ts`; `apps/web/lib/model-labels.ts`
 - 2026-09-18 — `apps/api/src/chat/`; sidebar; `preferModel` picker; sandbox prepull; `apps/web/lib/highlight.ts`

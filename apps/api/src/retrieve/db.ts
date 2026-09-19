@@ -171,6 +171,38 @@ export function migrate(): void {
     CREATE INDEX IF NOT EXISTS conversations_pinned_updated
       ON conversations(pinned, updated_at);
   `);
+
+  raw.exec(`
+    CREATE TABLE IF NOT EXISTS vault_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      heading TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  raw.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS vault_chunks_vec USING vec0(
+      chunk_id INTEGER PRIMARY KEY,
+      embedding FLOAT[768]
+    );
+  `);
+
+  raw.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS vault_chunks_fts USING fts5(
+      chunk_id UNINDEXED,
+      source,
+      heading,
+      body,
+      tokenize = 'porter unicode61'
+    );
+  `);
+
+  raw.exec(`
+    CREATE INDEX IF NOT EXISTS vault_chunks_source
+      ON vault_chunks(source);
+  `);
 }
 
 export { schema };

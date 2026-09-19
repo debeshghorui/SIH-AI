@@ -13,12 +13,15 @@ Agents: **read this first**. After a material change, add **one** Changelog line
 - Wiki, Cursor rules, `sovereign-workbench` skill, `models.yaml`
 - `data/plant.sqlite` (3 tags, 3 inspections, KB vec + FTS5), `data/kb/*.md`, `data/samples/` (CSV, tests, `inspection_scan.png`, `pid_c3.png`), `data/vault/`
 - Express: `/airgap/events`, `/models`, `/ollama/health`, `/chat` (SSE, `preferModel`, `conversationId`), `/conversations`, `/inspect`, `/upload`, `/sandbox`, `/artifacts`
+- Vault PDFs: all-page extract (text layer, else raster → tesseract → vision), chunked into sqlite-vec + FTS5; `retrieveFiles` searches that index
 - Next workbench: chat, Chat/Files sidebar, hideable trace, meter, Run on Sandbox, model picker
+- Follow-up “this pic / this document” reuses last vault extract (`vault_chunks`); plant SOP retrieve skipped; thin captions re-OCR
+- Chat images: tesseract then vision; user bubble shows a file pill (composer stays clean)
 - Scripts: `bun run web` / `api` / `demo` / `sandbox:prepull`
 
 ## Does not exist (do not pretend it does)
 
-- Vault keyword retrieve (`retrieveFiles`) — empty stub
+- ~~Vault keyword retrieve (`retrieveFiles`) — empty stub~~ Vault retrieve indexes extracted PDF/image text (`vault_chunks` + vec + FTS5)
 - Cloud LLM, Python sidecar, traces in SQLite
 
 ## Locked facts
@@ -53,8 +56,8 @@ Do not reopen unless the user says so.
 
 ## Changelog
 
+- 2026-09-19 — Image OCR: tesseract then vision; thin vault cache re-extracted; file pill on user bubbles.
+- 2026-09-19 — Sticky attachment: follow-ups reuse last vault extract; skip plant SOP retrieve.
+- 2026-09-19 — Vault delete resolves listed names like `file.pdf.pdf`; Express `/artifacts/{*name}` captures extra dots.
+- 2026-09-19 — Vault PDFs: all pages + line breaks; scanned pages rasterized (`@napi-rs/canvas`) then tesseract/vision; `retrieveFiles` indexes `vault_chunks`; document prompt on attach.
 - 2026-09-19 — Compressed memory to current truth (dropped phase diary). Preferences and D9 unchanged.
-- 2026-09-19 — Query translate: per-task nano prompts, Jaccard dedupe, domain-leak guard; retrieve unique queries; skip plant stores when `store: none`.
-- 2026-09-19 — UI lock: monochrome chrome, chromatic code tokens, green air-gap meter.
-- 2026-09-19 — Append-only `step` SSE trace; hideable pane; traces not in SQLite.
-- 2026-09-18 — Chat sessions in SQLite; composer `preferModel`; Docker sandbox + Run on Sandbox.

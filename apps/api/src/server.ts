@@ -20,6 +20,7 @@ import {
   TITLE_MAX,
 } from "./chat/sessions";
 import { vaultList, resolveVaultPath, vaultWrite, vaultDelete } from "./tools/fs";
+import { removeVaultIndex } from "./retrieve/vault-index";
 import {
   isPreviewLanguage,
   normalizeLanguage,
@@ -60,6 +61,15 @@ const patchConversationSchema = z
     message: "empty patch",
   });
 
+function artifactParam(name: string | string[] | undefined): string {
+  const raw = Array.isArray(name) ? name.join("/") : (name ?? "");
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export function createApp() {
   const app = express();
   app.disable("x-powered-by");
@@ -73,10 +83,12 @@ export function createApp() {
       return;
     }
     try {
-      const bytes = (req.body as unknown as Uint8Array)?.length ?? 0;
-      vaultWrite(name, req.body as unknown as string);
-      log.info({ name, bytes }, "vault upload");
-      res.json({ ok: true, name });
+      const bytes = Buffer.isBuffer(req.body)
+        ? req.body
+        : Buffer.from((req.body as Uint8Array | undefined) ?? []);
+      const stored = vaultWrite(name, bytes);
+      log.info({ name: stored, bytes: bytes.length }, "vault upload");
+      res.json({ ok: true, name: stored });
     } catch (err) {
       res.status(400).json({
         error: "upload-failed",
@@ -172,20 +184,27 @@ export function createApp() {
     res.json({ items: vaultList() });
   });
 
-  app.get("/artifacts/:name", (req, res, next) => {
+  app.get("/artifacts/{*name}", (req, res, next) => {
     try {
-      const full = resolveVaultPath(req.params.name);
+      const name = artifactParam(req.params.name);
+      const full = resolveVaultPath(name);
       res.sendFile(full);
     } catch (err) {
       next(err);
     }
   });
 
-  app.delete("/artifacts/:name", (req, res) => {
+  app.delete("/artifacts/{*name}", (req, res) => {
     try {
-      vaultDelete(req.params.name);
-      log.info({ name: req.params.name }, "vault delete");
-      res.json({ ok: true, name: req.params.name });
+      const name = artifactParam(req.params.name);
+      vaultDelete(name);
+      try {
+        removeVaultIndex(name);
+      } catch {
+        // Index tables may be empty on a fresh DB; file delete still counts.
+      }
+      log.info({ name }, "vault delete");
+      res.json({ ok: true, name });
     } catch (err) {
       res.status(400).json({
         error: "delete-failed",

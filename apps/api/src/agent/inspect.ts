@@ -52,7 +52,7 @@ export async function* runInspect(
   let ocrText = "";
   let visionFindings = "";
   try {
-    const out = await extractFindings(input.name);
+    const out = await extractFindings(input.name, { purpose: "inspection" });
     ocrText = out.text;
     visionFindings = out.vision;
     yield {

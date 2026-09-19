@@ -13,7 +13,11 @@ import {
   type Citation,
 } from "../retrieve/retrieve";
 import { extractFindings } from "../tools/ocr";
+import { indexVaultText, readVaultExtract } from "../retrieve/vault-index";
+import { resolveStickyAttachment, isThinExtract, wantsVerbatimExtract } from "./attachment";
 import type { AgentEvent } from "./events";
+
+const ATTACH_INLINE_CHARS = 18_000;
 
 export type PreferModel = "nano" | "chat" | "coder";
 
@@ -42,6 +46,13 @@ export async function* runAgent(
   const last = input.messages[input.messages.length - 1];
   const query = last?.content ?? "";
   const nano = getModel("nano");
+  const resolved = resolveStickyAttachment({
+    query,
+    messages: input.messages,
+    attachmentName: input.attachmentName,
+  });
+  const attachmentName = resolved.attachmentName;
+  const hasAttachment = Boolean(input.hasAttachment || attachmentName);
 
   // 1. Translate
   let translatedFailed = false;
@@ -83,7 +94,7 @@ export async function* runAgent(
 
   // 2. Route
   const routed = await route(query, translated, {
-    hasAttachment: input.hasAttachment,
+    hasAttachment,
   });
   const decision = routed.decision;
   const routedAnswer = decision.model === "vision" ? "chat" : decision.model;
@@ -133,72 +144,135 @@ export async function* runAgent(
     },
   };
 
-  // 2b. Read an uploaded vault document into context (PDF text layer or vision).
+  // 2b. Read the vault document. Fresh uploads run OCR/vision. Follow-ups
+  // that refer to the last file reuse vault_chunks so plant SOP is skipped.
   let attachmentContext = "";
-  if (input.attachmentName) {
-    try {
-      const doc = await extractFindings(input.attachmentName);
-      attachmentContext = [doc.text, doc.vision].filter(Boolean).join("\n\n");
+  if (attachmentName) {
+    const cached = resolved.sticky ? readVaultExtract(attachmentName) : "";
+    const reuseCache = Boolean(cached) && !isThinExtract(cached);
+    if (reuseCache) {
+      attachmentContext = cached;
       yield {
         type: "step",
         stage: "tool",
-        title: `OCR ${input.attachmentName}`,
-        detail: attachmentContext
-          ? attachmentContext.slice(0, 800)
-          : "Attachment produced no extractable text or vision caption.",
-        data: { tool: "ocr" },
+        title: `Reuse ${attachmentName}`,
+        detail: `Follow-up refers to the last attached file (${cached.length} chars from vault index). Plant SOP stores will not be queried.`,
+        data: { tool: "fs" },
       };
-    } catch (err) {
-      const message = `attachment read failed: ${err instanceof Error ? err.message : String(err)}`;
-      yield { type: "error", message };
+    } else {
+      try {
+        const doc = await extractFindings(attachmentName, {
+          purpose: "document",
+        });
+        attachmentContext = [doc.text, doc.vision].filter(Boolean).join("\n\n");
+        const methods = doc.methods.length ? doc.methods.join("+") : "none";
+        yield {
+          type: "step",
+          stage: "tool",
+          title: resolved.sticky
+            ? `OCR ${attachmentName} (thin cache)`
+            : `OCR ${attachmentName}`,
+          detail: attachmentContext
+            ? `${doc.pages} page(s), method=${methods}. ${attachmentContext.slice(0, 800)}`
+            : "Attachment produced no extractable text or vision caption.",
+          data: { tool: "ocr" },
+        };
+        if (attachmentContext) {
+          try {
+            const indexed = await indexVaultText(
+              attachmentName,
+              attachmentContext,
+            );
+            yield {
+              type: "step",
+              stage: "tool",
+              title: `Index ${attachmentName}`,
+              detail: `Stored ${indexed.chunks} vault chunk(s); ${indexed.embedded} embedded for later file search.`,
+              data: { tool: "fs" },
+            };
+          } catch (err) {
+            yield {
+              type: "step",
+              stage: "tool",
+              title: `Index ${attachmentName} failed`,
+              detail: err instanceof Error ? err.message : String(err),
+              data: { tool: "fs" },
+            };
+          }
+        }
+      } catch (err) {
+        const message = `attachment read failed: ${err instanceof Error ? err.message : String(err)}`;
+        yield { type: "error", message };
+      }
     }
   }
 
-  // 3. Retrieve
+  // 3. Retrieve. Attached files skip plant SOP stores; long extracts still
+  // query the vault index for the passages that match the question.
   let citations: Citation[] = [];
+  const retrieveStore = attachmentName ? "files" : decision.store;
+  const shortAttach =
+    Boolean(attachmentContext) &&
+    attachmentContext.length <= ATTACH_INLINE_CHARS;
   try {
-    const plan = retrievalPlan(translated, query);
-    const result = await retrieve(plan.queries, decision.store, {
-      hyde: plan.hyde,
-    });
-    citations = result.citations;
-    const searched = result.queries.join(" | ");
-    const hydeLine = result.usedHyde ? " HyDE embedded on the vector path." : "";
-    const ftsLine = result.usedFts
-      ? `FTS5 keyword fallback because best vector score was ${result.bestVectorScore ?? 0} (floor ${VECTOR_SCORE_FLOOR}).`
-      : "No FTS5 fallback.";
-    if (decision.store === "none" && citations.length === 0) {
+    if (shortAttach) {
       yield {
         type: "step",
         stage: "retrieve",
-        title: "Retrieve skipped",
-        detail: "Router store is none — no plant documents were queried.",
+        title: "Retrieve files (attached)",
+        detail: `Using extracted text from ${attachmentName} (${attachmentContext.length} chars). Plant SOP stores were not queried.`,
         data: {
-          store: "none",
+          store: "files",
           citations: [],
           usedFts: false,
-          queries: result.queries,
-          usedHyde: result.usedHyde,
+          queries: [],
+          usedHyde: false,
         },
       };
     } else {
-      yield {
-        type: "step",
-        stage: "retrieve",
-        title: citations.length
-          ? `Retrieve ${decision.store} (${citations.length})`
-          : `Retrieve ${decision.store} (empty)`,
-        detail: citations.length
-          ? `Searched: ${searched}.${hydeLine} ${ftsLine}`
-          : `No citations from store ${decision.store}. Searched: ${searched}.${hydeLine} ${ftsLine}`,
-        data: {
-          store: decision.store,
-          citations,
-          usedFts: result.usedFts,
-          queries: result.queries,
-          usedHyde: result.usedHyde,
-        },
-      };
+      const plan = retrievalPlan(translated, query);
+      const result = await retrieve(plan.queries, retrieveStore, {
+        hyde: retrieveStore === "vector" ? plan.hyde : undefined,
+      });
+      citations = result.citations;
+      const searched = result.queries.join(" | ");
+      const hydeLine = result.usedHyde ? " HyDE embedded on the vector path." : "";
+      const ftsLine = result.usedFts
+        ? `FTS5 keyword fallback because best vector score was ${result.bestVectorScore ?? 0} (floor ${VECTOR_SCORE_FLOOR}).`
+        : "No FTS5 fallback.";
+      if (retrieveStore === "none" && citations.length === 0) {
+        yield {
+          type: "step",
+          stage: "retrieve",
+          title: "Retrieve skipped",
+          detail: "Router store is none — no plant documents were queried.",
+          data: {
+            store: "none",
+            citations: [],
+            usedFts: false,
+            queries: result.queries,
+            usedHyde: result.usedHyde,
+          },
+        };
+      } else {
+        yield {
+          type: "step",
+          stage: "retrieve",
+          title: citations.length
+            ? `Retrieve ${retrieveStore} (${citations.length})`
+            : `Retrieve ${retrieveStore} (empty)`,
+          detail: citations.length
+            ? `Searched: ${searched}.${hydeLine} ${ftsLine}`
+            : `No citations from store ${retrieveStore}. Searched: ${searched}.${hydeLine} ${ftsLine}`,
+          data: {
+            store: retrieveStore,
+            citations,
+            usedFts: result.usedFts,
+            queries: result.queries,
+            usedHyde: result.usedHyde,
+          },
+        };
+      }
     }
   } catch (err) {
     yield {
@@ -222,14 +296,12 @@ export async function* runAgent(
     ollama: answerModel.ollama,
   };
 
-  const systemContent =
-    "You are the MRPL sovereign workbench assistant. Answer concisely about plant SOPs, isolation, and approval notes. " +
-    "Cite sources only as (1), (2), ... matching the numbered context below. Never invent a source, filename, or citation number that is not in the context. " +
-    "If there is no context, answer from general knowledge and state plainly that no plant document was retrieved." +
-    (attachmentContext
-      ? `\n\nAttached document (${input.attachmentName}):\n${attachmentContext.slice(0, 6000)}`
-      : "") +
-    (context ? `\n\nContext:\n${context}` : "");
+  const systemContent = generateSystemPrompt({
+    attachmentName,
+    attachmentContext,
+    citationsContext: context,
+    verbatim: wantsVerbatimExtract(query),
+  });
 
   const genMessages: Message[] = [
     { role: "system", content: systemContent },
@@ -264,6 +336,52 @@ export async function* runAgent(
       message: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+function inlineAttachment(text: string): string {
+  if (text.length <= ATTACH_INLINE_CHARS) return text;
+  return (
+    text.slice(0, 8_000) +
+    "\n\n[... middle pages stored in the vault index; matching passages are in the numbered context ...]\n\n" +
+    text.slice(-4_000)
+  );
+}
+
+function generateSystemPrompt(input: {
+  attachmentName?: string;
+  attachmentContext: string;
+  citationsContext: string;
+  verbatim?: boolean;
+}): string {
+  const citeRule =
+    "Cite sources only as (1), (2), ... matching the numbered context below. Never invent a source, filename, or citation number that is not in the context.";
+
+  if (input.attachmentContext) {
+    const how =
+      input.verbatim
+        ? "The user asked for the file text. Reproduce the extract verbatim as markdown. Do not paraphrase, shorten, or skip list items."
+        : "Answer using the attached document extract. Quote or paraphrase only what appears there.";
+    return [
+      "You are a document assistant on a sovereign on-prem workbench.",
+      how,
+      "If the extract is empty or clearly incomplete, say you could not read that part of the file. Do not invent titles, course names, authors, dates, or section content.",
+      "Do not treat the file as a plant SOP unless the extract itself is a plant document.",
+      citeRule,
+      `Attached document (${input.attachmentName}):\n${inlineAttachment(input.attachmentContext)}`,
+      input.citationsContext
+        ? `Retrieved vault passages:\n${input.citationsContext}`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  return (
+    "You are the MRPL sovereign workbench assistant. Answer concisely about plant SOPs, isolation, and approval notes. " +
+    citeRule +
+    " If there is no context, answer from general knowledge and state plainly that no plant document was retrieved." +
+    (input.citationsContext ? `\n\nContext:\n${input.citationsContext}` : "")
+  );
 }
 
 /**

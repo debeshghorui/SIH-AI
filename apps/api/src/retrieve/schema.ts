@@ -44,6 +44,19 @@ export const kbChunks = sqliteTable("kb_chunks", {
 });
 
 /**
+ * Vault document chunks. Uploaded PDFs/images are extracted then stored
+ * here (plus vault_chunks_vec / vault_chunks_fts) so `store: files` can
+ * retrieve them after the original attachment turn.
+ */
+export const vaultChunks = sqliteTable("vault_chunks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  source: text("source").notNull(),
+  heading: text("heading").notNull(),
+  body: text("body").notNull(),
+  created_at: text("created_at").default(sql`CURRENT_TIMESTAMP`),
+});
+
+/**
  * Chat threads. Pinned rows sort above recents in the workbench sidebar.
  * `pinned` is 0/1 (SQLite has no bool).
  */
@@ -69,5 +82,6 @@ export const messages = sqliteTable("messages", {
 export type Tag = typeof tags.$inferSelect;
 export type Inspection = typeof inspections.$inferSelect;
 export type KbChunk = typeof kbChunks.$inferSelect;
+export type VaultChunk = typeof vaultChunks.$inferSelect;
 export type ConversationRow = typeof conversations.$inferSelect;
 export type MessageRow = typeof messages.$inferSelect;

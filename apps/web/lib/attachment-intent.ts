@@ -17,3 +17,14 @@ export function wantsInspectionBeat(text: string, file: File): boolean {
 
   return false;
 }
+
+/** Hide `[attachment: name]` in the bubble; the payload still keeps the chip. */
+export function stripAttachmentChip(content: string): string {
+  return content.replace(/\n?\[attachment:\s*[^\]]+\]\s*$/i, "").trim();
+}
+
+export function attachmentChipName(content: string): string | undefined {
+  const match = content.match(/\[attachment:\s*([^\]]+)\]\s*$/i);
+  const name = match?.[1]?.trim();
+  return name || undefined;
+}
